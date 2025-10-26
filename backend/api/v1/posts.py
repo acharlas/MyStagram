@@ -37,6 +37,7 @@ class PostResponse(BaseModel):
     id: int
     author_id: str
     author_name: str | None = None
+    author_username: str | None = None
     image_key: str
     caption: str | None = None
     like_count: int = 0
@@ -47,6 +48,7 @@ class PostResponse(BaseModel):
         cls,
         post: Post,
         author_name: str | None = None,
+        author_username: str | None = None,
         *,
         like_count: int = 0,
         viewer_has_liked: bool = False,
@@ -57,6 +59,7 @@ class PostResponse(BaseModel):
             id=post.id,
             author_id=post.author_id,
             author_name=author_name,
+            author_username=author_username,
             image_key=post.image_key,
             caption=post.caption,
             like_count=like_count,
@@ -203,6 +206,7 @@ async def create_post(
     return PostResponse.from_post(
         post,
         author_name=current_user.name,
+        author_username=current_user.username,
         like_count=0,
         viewer_has_liked=False,
     )
@@ -232,6 +236,7 @@ async def list_posts(
         PostResponse.from_post(
             post,
             author_name=current_user.name,
+            author_username=current_user.username,
             like_count=count_map.get(post.id, 0) if post.id is not None else 0,
             viewer_has_liked=post.id in liked_set if post.id is not None else False,
         )
@@ -251,23 +256,24 @@ async def get_feed(
         )
 
     result = await session.execute(
-        select(Post, User.name)
+        select(Post, User.name, User.username)
         .join(User, _eq(User.id, Post.author_id))
         .join(Follow, _eq(Follow.followee_id, Post.author_id))
         .where(_eq(Follow.follower_id, current_user.id))
         .order_by(Post.created_at.desc())  # type: ignore[attr-defined]
     )
     rows = result.all()
-    post_ids = [post.id for post, _ in rows if post.id is not None]
+    post_ids = [post.id for post, _name, _username in rows if post.id is not None]
     count_map, liked_set = await collect_like_meta(session, post_ids, current_user.id)
     return [
         PostResponse.from_post(
             post,
             author_name=author_name,
+            author_username=username,
             like_count=count_map.get(post.id, 0) if post.id is not None else 0,
             viewer_has_liked=post.id in liked_set if post.id is not None else False,
         )
-        for post, author_name in rows
+        for post, author_name, username in rows
     ]
 
 
@@ -285,7 +291,7 @@ async def get_post(
         )
 
     result = await session.execute(
-        select(Post, User.name)
+        select(Post, User.name, User.username)
         .join(User, _eq(User.id, Post.author_id))
         .where(_eq(Post.id, post_id))
         .limit(1)
@@ -294,7 +300,7 @@ async def get_post(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
-    post, author_name = row
+    post, author_name, author_username = row
 
     if not await _user_can_view_post(session, viewer_id, post.author_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
@@ -310,6 +316,7 @@ async def get_post(
     return PostResponse.from_post(
         post,
         author_name=author_name,
+        author_username=author_username,
         like_count=like_count,
         viewer_has_liked=viewer_has_liked,
     )

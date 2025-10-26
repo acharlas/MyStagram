@@ -24,6 +24,11 @@ const nextConfig: NextConfig = (() => {
 
   return {
     images,
+    experimental: {
+      serverActions: {
+        bodySizeLimit: "2mb",
+      },
+    },
   } satisfies NextConfig;
 })();
 

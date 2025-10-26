@@ -32,6 +32,7 @@ describe("fetchPostDetail", () => {
       id: 42,
       author_id: "user-1",
       author_name: "User One",
+      author_username: "user1",
       caption: "Hello",
       image_key: "photos/hello.jpg",
       like_count: 3,
@@ -49,6 +50,7 @@ describe("fetchPostDetail", () => {
       }),
     );
     expect(result?.id).toBe(42);
+    expect(result?.author_username).toBe("user1");
     expect(result?.like_count).toBe(3);
     expect(result?.viewer_has_liked).toBe(true);
   });
@@ -74,6 +76,7 @@ describe("fetchPostComments", () => {
         id: 1,
         author_id: "user-1",
         author_name: "User One",
+        author_username: "user1",
         text: "Nice shot!",
         created_at: "2024-01-01T00:00:00Z",
       },

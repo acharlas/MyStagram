@@ -48,7 +48,8 @@ function CommentIcon() {
 function PostCard({ post }: { post: FeedPost }) {
   const safeCaption = post.caption ? sanitizeHtml(post.caption) : "";
   const imageUrl = buildImageUrl(post.image_key);
-  const displayName = post.author_name ?? post.author_id;
+  const displayName =
+    post.author_name ?? post.author_username ?? post.author_id;
   const initials = displayName
     .split(/\s+/u)
     .filter(Boolean)

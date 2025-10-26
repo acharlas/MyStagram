@@ -32,21 +32,22 @@ async def home_feed(
         )
 
     result = await session.execute(
-        select(Post, User.name)
+        select(Post, User.name, User.username)
         .join(User, _eq(User.id, Post.author_id))
         .join(Follow, _eq(Follow.followee_id, Post.author_id))
         .where(_eq(Follow.follower_id, current_user.id))
         .order_by(Post.created_at.desc())  # type: ignore[attr-defined]
     )
     rows = result.all()
-    post_ids = [post.id for post, _ in rows if post.id is not None]
+    post_ids = [post.id for post, _name, _username in rows if post.id is not None]
     count_map, liked_set = await collect_like_meta(session, post_ids, current_user.id)
     return [
         PostResponse.from_post(
             post,
             author_name=author_name,
+            author_username=username,
             like_count=count_map.get(post.id, 0) if post.id is not None else 0,
             viewer_has_liked=post.id in liked_set if post.id is not None else False,
         )
-        for post, author_name in rows
+        for post, author_name, username in rows
     ]
