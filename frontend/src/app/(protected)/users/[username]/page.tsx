@@ -5,6 +5,10 @@ import { notFound } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { FollowButton } from "@/components/user/FollowButton";
 import {
+  followUserAction,
+  unfollowUserAction,
+} from "./actions";
+import {
   fetchUserFollowers,
   fetchUserPosts,
   fetchUserProfile,
@@ -81,8 +85,9 @@ export default async function UserProfilePage({
           ) : null}
           {!isOwnProfile && viewerUsername && accessToken ? (
             <FollowButton
-              username={profile.username}
               initiallyFollowing={isFollowing}
+              followAction={followUserAction.bind(null, profile.username)}
+              unfollowAction={unfollowUserAction.bind(null, profile.username)}
             />
           ) : null}
         </div>

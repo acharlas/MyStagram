@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+
+import type { FollowActionResult } from "@/app/(protected)/users/[username]/follow-helpers";
 
 type FollowButtonProps = {
-  username: string;
   initiallyFollowing: boolean;
+  followAction: () => Promise<FollowActionResult>;
+  unfollowAction: () => Promise<FollowActionResult>;
 };
 
 function getLabel(isFollowing: boolean): string {
@@ -13,10 +15,10 @@ function getLabel(isFollowing: boolean): string {
 }
 
 export function FollowButton({
-  username,
   initiallyFollowing,
+  followAction,
+  unfollowAction,
 }: FollowButtonProps) {
-  const router = useRouter();
   const [isFollowing, setIsFollowing] = useState(initiallyFollowing);
   const [isPending, startTransition] = useTransition();
 
@@ -30,22 +32,15 @@ export function FollowButton({
     }
 
     const nextFollowing = !isFollowing;
-    const method = nextFollowing ? "POST" : "DELETE";
+    const action = nextFollowing ? followAction : unfollowAction;
 
     startTransition(async () => {
       setIsFollowing(nextFollowing);
       try {
-        const response = await fetch(
-          `/api/users/${encodeURIComponent(username)}/follow`,
-          {
-            method,
-            credentials: "include",
-          },
-        );
-        if (!response.ok) {
-          throw new Error("Request failed");
+        const result = await action();
+        if (!result.success) {
+          throw new Error(result.error ?? "Follow request failed");
         }
-        router.refresh();
       } catch (error) {
         console.error("Failed to toggle follow state", error);
         setIsFollowing((previous) => !previous);
