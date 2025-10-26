@@ -30,12 +30,15 @@ export function NavBar({ username }: NavBarProps) {
 
       <nav className="flex-1 space-y-2">
         {NAV_ITEMS.map((item) => {
-          const isActive =
-            pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const href =
+            item.href === "/profile" && username
+              ? `/users/${encodeURIComponent(username)}`
+              : item.href;
+          const isActive = pathname === href || pathname.startsWith(`${href}/`);
           return (
             <Link
-              key={item.href}
-              href={item.href}
+              key={item.label}
+              href={href}
               className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition ${
                 isActive
                   ? "bg-zinc-800 font-semibold"

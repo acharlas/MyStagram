@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from core.config import settings
-from models import Post
+from models import Comment, Like, Post
 from api.v1 import posts as posts_api
 from services import storage
 
@@ -79,6 +79,8 @@ async def test_create_and_get_post(
     created = create_response.json()
     assert created["caption"] == "First shot!"
     assert created["image_key"].endswith(".jpg")
+    assert created["like_count"] == 0
+    assert created["viewer_has_liked"] is False
 
     assert stored_objects, "Image should be uploaded"
 
@@ -90,10 +92,14 @@ async def test_create_and_get_post(
     get_response = await async_client.get(f"/api/v1/posts/{post_id}")
     assert get_response.status_code == 200
     assert get_response.json()["id"] == post_id
+    assert get_response.json()["like_count"] == 0
 
     list_response = await async_client.get("/api/v1/posts")
     assert list_response.status_code == 200
-    assert len(list_response.json()) == 1
+    listed = list_response.json()
+    assert len(listed) == 1
+    assert listed[0]["like_count"] == 0
+    assert listed[0]["viewer_has_liked"] is False
 
 
 @pytest.mark.asyncio
@@ -114,6 +120,229 @@ async def test_get_post_not_found(async_client: AsyncClient):
 
     response = await async_client.get("/api/v1/posts/999")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_post_requires_follow_or_ownership(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("viewer")
+    author_payload = make_user_payload("author")
+    stranger_payload = make_user_payload("stranger")
+
+    await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    await async_client.post("/api/v1/auth/register", json=stranger_payload)
+
+    author_id = author_response.json()["id"]
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{author_payload['username']}/follow")
+
+    post = Post(author_id=author_id, image_key="posts/test.jpg", caption="Shared")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+
+    response = await async_client.get(f"/api/v1/posts/{post.id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["caption"] == "Shared"
+    assert payload["like_count"] == 0
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": stranger_payload["username"], "password": stranger_payload["password"]},
+    )
+    forbidden = await async_client.get(f"/api/v1/posts/{post.id}")
+    assert forbidden.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_post_comments_requires_access(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("viewer")
+    author_payload = make_user_payload("author")
+
+    viewer_response = await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+
+    viewer_id = viewer_response.json()["id"]
+    author_id = author_response.json()["id"]
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{author_payload['username']}/follow")
+
+    post = Post(author_id=author_id, image_key="posts/test-comments.jpg", caption="Commented")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+
+    now = datetime.now(timezone.utc)
+    comments = [
+        Comment(
+            post_id=post.id,
+            author_id=viewer_id,
+            text="First!",
+            created_at=now,
+            updated_at=now,
+        ),
+        Comment(
+            post_id=post.id,
+            author_id=author_id,
+            text="Thanks!",
+            created_at=now + timedelta(seconds=5),
+            updated_at=now + timedelta(seconds=5),
+        ),
+    ]
+    for comment in comments:
+        db_session.add(comment)
+    await db_session.commit()
+
+    response = await async_client.get(f"/api/v1/posts/{post.id}/comments")
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["text"] for item in payload] == ["First!", "Thanks!"]
+
+    await async_client.post("/api/v1/auth/logout")
+    author_login = await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": author_payload["username"], "password": author_payload["password"]},
+    )
+    assert author_login.status_code == 200
+    author_response = await async_client.get(f"/api/v1/posts/{post.id}/comments")
+    assert author_response.status_code == 200
+
+    # Unrelated user cannot view comments
+    outsider_payload = make_user_payload("outsider")
+    await async_client.post("/api/v1/auth/register", json=outsider_payload)
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": outsider_payload["username"], "password": outsider_payload["password"]},
+    )
+    denied = await async_client.get(f"/api/v1/posts/{post.id}/comments")
+    assert denied.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_comment_endpoint(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("viewer")
+    author_payload = make_user_payload("author")
+
+    viewer_response = await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+
+    viewer_id = viewer_response.json()["id"]
+    author_id = author_response.json()["id"]
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{author_payload['username']}/follow")
+
+    post = Post(author_id=author_id, image_key="posts/comment-create.jpg", caption="New comment")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+
+    response = await async_client.post(
+        f"/api/v1/posts/{post.id}/comments",
+        json={"text": "  Merci!  "},
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["text"] == "Merci!"
+    assert data["author_id"] == viewer_id
+
+    # ensure comment persisted
+    stored = await db_session.execute(
+        select(Comment).where(_eq(Comment.post_id, post.id), _eq(Comment.author_id, viewer_id))
+    )
+    comment = stored.scalar_one_or_none()
+    assert comment is not None
+    assert comment.text == "Merci!"
+
+    # outsider cannot comment
+    outsider_payload = make_user_payload("outsider")
+    await async_client.post("/api/v1/auth/register", json=outsider_payload)
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": outsider_payload["username"], "password": outsider_payload["password"]},
+    )
+    forbidden = await async_client.post(
+        f"/api/v1/posts/{post.id}/comments",
+        json={"text": "Hello"},
+    )
+    assert forbidden.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_like_and_unlike_post(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("viewer")
+    author_payload = make_user_payload("author")
+
+    viewer_response = await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+
+    viewer_id = viewer_response.json()["id"]
+    author_id = author_response.json()["id"]
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{author_payload['username']}/follow")
+
+    post = Post(author_id=author_id, image_key="posts/like.jpg", caption="Like me")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+
+    like_response = await async_client.post(f"/api/v1/posts/{post.id}/likes")
+    assert like_response.status_code == 200
+    assert like_response.json()["like_count"] == 1
+    exists = await db_session.execute(
+        select(Like).where(_eq(Like.user_id, viewer_id), _eq(Like.post_id, post.id))
+    )
+    assert exists.scalar_one_or_none() is not None
+
+    # liking again is idempotent
+    again = await async_client.post(f"/api/v1/posts/{post.id}/likes")
+    assert again.status_code == 200
+    assert again.json()["like_count"] == 1
+
+    unlike_response = await async_client.delete(f"/api/v1/posts/{post.id}/likes")
+    assert unlike_response.status_code == 200
+    assert unlike_response.json()["like_count"] == 0
+    exists_after = await db_session.execute(
+        select(Like).where(_eq(Like.user_id, viewer_id), _eq(Like.post_id, post.id))
+    )
+    assert exists_after.scalar_one_or_none() is None
+
+    outsider_payload = make_user_payload("outsider")
+    await async_client.post("/api/v1/auth/register", json=outsider_payload)
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": outsider_payload["username"], "password": outsider_payload["password"]},
+    )
+    forbidden_like = await async_client.post(f"/api/v1/posts/{post.id}/likes")
+    assert forbidden_like.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -206,6 +435,8 @@ async def test_feed_returns_followee_posts(
 
     assert [item["caption"] for item in feed] == ["Followee2 newest", "Followee1 older"]
     assert all(item["author_id"] in {followee1_id, followee2_id} for item in feed)
+    assert all(item["like_count"] == 0 for item in feed)
+    assert all(item["viewer_has_liked"] is False for item in feed)
 
 
 @pytest.mark.asyncio

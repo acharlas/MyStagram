@@ -13,8 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from api.deps import get_current_user, get_db
+from api.v1.posts import collect_like_meta
 from core import settings
-from models import Follow, User
+from models import Follow, Post, User
 from services import (
     JPEG_CONTENT_TYPE,
     UploadTooLargeError,
@@ -51,6 +52,14 @@ class UserProfilePublic(BaseModel):
 
 class UserProfilePrivate(UserProfilePublic):
     email: EmailStr
+
+
+class UserPostSummary(BaseModel):
+    id: int
+    image_key: str
+    caption: str | None = None
+    like_count: int = 0
+    viewer_has_liked: bool = False
 
 
 @router.get("/users/search", response_model=list[UserProfilePublic])
@@ -166,6 +175,57 @@ async def update_me(
         await session.refresh(current_user)
 
     return UserProfilePrivate.model_validate(current_user)
+
+
+@router.get("/users/{username}/posts", response_model=list[UserPostSummary])
+async def list_user_posts(
+    username: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> list[UserPostSummary]:
+    """Return posts authored by the specified user when visible to the viewer."""
+    result = await session.execute(select(User).where(_eq(User.username, username)))
+    author = result.scalar_one_or_none()
+    if author is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if current_user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User record missing identifier",
+        )
+    if author.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Target user record missing identifier",
+        )
+
+    viewer_id = current_user.id
+
+    posts_result = await session.execute(
+        select(Post)
+        .where(_eq(Post.author_id, author.id))
+        .order_by(Post.created_at.desc())  # type: ignore[attr-defined]
+    )
+    posts = posts_result.scalars().all()
+
+    post_ids = [post.id for post in posts if post.id is not None]
+    like_counts, liked_set = await collect_like_meta(session, post_ids, viewer_id)
+
+    summaries: list[UserPostSummary] = []
+    for post in posts:
+        if post.id is None:
+            continue
+        summaries.append(
+            UserPostSummary(
+                id=post.id,
+                image_key=post.image_key,
+                caption=post.caption,
+                like_count=like_counts.get(post.id, 0),
+                viewer_has_liked=post.id in liked_set,
+            )
+        )
+    return summaries
 
 
 @router.post("/users/{username}/follow", status_code=status.HTTP_200_OK)
