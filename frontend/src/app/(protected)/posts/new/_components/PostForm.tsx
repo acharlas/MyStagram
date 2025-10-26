@@ -97,7 +97,9 @@ export function PostForm() {
     }
 
     if (caption.length > MAX_CAPTION_LENGTH) {
-      setError("La légende est trop longue (500 caractères max).");
+      setError(
+        `La légende est trop longue (${MAX_CAPTION_LENGTH} caractères max).`,
+      );
       return;
     }
 

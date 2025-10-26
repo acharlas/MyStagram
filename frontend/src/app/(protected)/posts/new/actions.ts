@@ -77,7 +77,11 @@ export async function createPostAction(
   }
 
   if (caption.length > MAX_CAPTION_LENGTH) {
-    return buildState("La légende est trop longue (500 caractères max).", caption, false);
+    return buildState(
+      `La légende est trop longue (${MAX_CAPTION_LENGTH} caractères max).`,
+      caption,
+      false,
+    );
   }
 
   const uploadPayload = new FormData();
