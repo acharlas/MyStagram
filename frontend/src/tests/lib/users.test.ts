@@ -1,15 +1,29 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchUserPosts, fetchUserProfile } from "../../lib/api/users";
+import {
+  fetchUserFollowers,
+  fetchUserPosts,
+  fetchUserProfile,
+  followUserRequest,
+  unfollowUserRequest,
+} from "../../lib/api/users";
 
-const apiServerFetchMock = vi.fn();
+const apiServerFetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../lib/api/client", () => ({
   apiServerFetch: apiServerFetchMock,
 }));
 
+const ORIGINAL_BACKEND_URL = process.env.BACKEND_API_URL;
+
+beforeEach(() => {
+  process.env.BACKEND_API_URL = "http://backend:8000";
+});
+
 afterEach(() => {
   apiServerFetchMock.mockReset();
+  vi.unstubAllGlobals();
+  process.env.BACKEND_API_URL = ORIGINAL_BACKEND_URL;
 });
 
 describe("fetchUserProfile", () => {
@@ -69,5 +83,113 @@ describe("fetchUserPosts", () => {
     const result = await fetchUserPosts("demo");
 
     expect(result).toEqual([]);
+  });
+});
+
+describe("fetchUserFollowers", () => {
+  it("returns followers list on success", async () => {
+    const followers = [
+      {
+        id: "follower-1",
+        username: "ally",
+        name: "Ally",
+        bio: null,
+        avatar_key: null,
+      },
+    ];
+    apiServerFetchMock.mockResolvedValueOnce(followers);
+
+    const result = await fetchUserFollowers("demo", "token-1");
+
+    expect(result).toEqual(followers);
+    expect(apiServerFetchMock).toHaveBeenCalledWith(
+      "/api/v1/users/demo/followers",
+      expect.objectContaining({
+        headers: {
+          Cookie: "access_token=token-1",
+        },
+      }),
+    );
+  });
+
+  it("returns empty list when backend call fails", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
+
+    const result = await fetchUserFollowers("demo");
+
+    expect(result).toEqual([]);
+  });
+});
+
+describe("followUserRequest", () => {
+  it("returns success when backend accepts follow", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ detail: "Followed" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await followUserRequest("demo", "access-123");
+
+    expect(result).toEqual({
+      success: true,
+      status: 200,
+      detail: "Followed",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/users/demo/follow"),
+      expect.objectContaining({
+        method: "POST",
+        headers: { Cookie: "access_token=access-123" },
+      }),
+    );
+  });
+
+  it("returns failure when backend rejects follow", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ detail: "User not found" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await followUserRequest("ghost", "access-123");
+
+    expect(result).toEqual({
+      success: false,
+      status: 404,
+      detail: "User not found",
+    });
+  });
+});
+
+describe("unfollowUserRequest", () => {
+  it("returns success when backend accepts unfollow", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ detail: "Unfollowed" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await unfollowUserRequest("demo", "access-123");
+
+    expect(result).toEqual({
+      success: true,
+      status: 200,
+      detail: "Unfollowed",
+    });
+  });
+
+  it("handles network errors gracefully", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("network"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await unfollowUserRequest("demo", "access-123");
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe(500);
+    expect(result.detail).toBe("network");
   });
 });

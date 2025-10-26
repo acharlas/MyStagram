@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from core.config import settings
-from models import User
+from models import Follow, Like, Post, User
 from api.v1 import users as users_api
 from services import storage
 
@@ -268,3 +268,97 @@ async def test_search_users_returns_empty_for_whitespace(async_client: AsyncClie
     response = await async_client.get("/api/v1/users/search", params={"q": "   "})
     assert response.status_code == 200
     assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_user_posts_visible_to_owner(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = make_payload_for("owner_view")
+    await async_client.post("/api/v1/auth/register", json=owner)
+
+    owner_record = (
+        await db_session.execute(select(User).where(_eq(User.username, owner["username"])))
+    ).scalar_one()
+
+    post = Post(author_id=owner_record.id, image_key="posts/owner.jpg", caption="Hello")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": owner["username"], "password": owner["password"]},
+    )
+
+    response = await async_client.get(f"/api/v1/users/{owner['username']}/posts")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["id"] == post.id
+    assert body[0]["image_key"] == "posts/owner.jpg"
+    assert body[0]["like_count"] == 0
+    assert body[0]["viewer_has_liked"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_user_posts_requires_follow(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    author_payload = make_payload_for("author_feed")
+    viewer_payload = make_payload_for("viewer_feed")
+    await async_client.post("/api/v1/auth/register", json=author_payload)
+    await async_client.post("/api/v1/auth/register", json=viewer_payload)
+
+    author = (
+        await db_session.execute(
+            select(User).where(_eq(User.username, author_payload["username"]))
+        )
+    ).scalar_one()
+    viewer = (
+        await db_session.execute(
+            select(User).where(_eq(User.username, viewer_payload["username"]))
+        )
+    ).scalar_one()
+
+    post = Post(author_id=author.id, image_key="posts/feed.jpg", caption="Feed me")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+
+    response = await async_client.get(f"/api/v1/users/{author_payload['username']}/posts")
+    assert response.status_code == status.HTTP_200_OK
+    items = response.json()
+    assert len(items) == 1
+    assert items[0]["id"] == post.id
+    assert items[0]["like_count"] == 0
+    assert items[0]["viewer_has_liked"] is False
+
+    await async_client.post("/api/v1/auth/logout")
+
+    follow = Follow(follower_id=viewer.id, followee_id=author.id)
+    db_session.add(follow)
+    db_session.add(Like(user_id=viewer.id, post_id=post.id))
+    await db_session.commit()
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+
+    allowed_response = await async_client.get(
+        f"/api/v1/users/{author_payload['username']}/posts"
+    )
+    assert allowed_response.status_code == 200
+    items = allowed_response.json()
+    assert len(items) == 1
+    assert items[0]["id"] == post.id
+    assert items[0]["like_count"] == 1
+    assert items[0]["viewer_has_liked"] is True

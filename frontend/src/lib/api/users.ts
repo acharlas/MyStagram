@@ -13,6 +13,21 @@ export type UserGridPost = {
   image_key: string;
   caption: string | null;
   like_count: number;
+  viewer_has_liked?: boolean;
+};
+
+export type UserProfilePublic = {
+  id: string;
+  username: string;
+  name: string | null;
+  bio: string | null;
+  avatar_key: string | null;
+};
+
+export type FollowMutationResult = {
+  success: boolean;
+  status: number;
+  detail: string | null;
 };
 
 function buildHeaders(accessToken?: string): HeadersInit | undefined {
@@ -59,4 +74,99 @@ export async function fetchUserPosts(
     console.error("Failed to load user posts", error);
     return [];
   }
+}
+
+export async function fetchUserFollowers(
+  username: string,
+  accessToken?: string,
+): Promise<UserProfilePublic[]> {
+  try {
+    return await apiServerFetch<UserProfilePublic[]>(
+      `${buildProfilePath(username)}/followers`,
+      {
+        cache: "no-store",
+        headers: buildHeaders(accessToken),
+      },
+    );
+  } catch (error) {
+    console.error("Failed to load user followers", error);
+    return [];
+  }
+}
+
+function buildFollowUrl(username: string): string {
+  const base = process.env.BACKEND_API_URL ?? "http://backend:8000";
+  return new URL(
+    `/api/v1/users/${encodeURIComponent(username)}/follow`,
+    base,
+  ).toString();
+}
+
+async function mutateFollow(
+  username: string,
+  method: "POST" | "DELETE",
+  accessToken?: string,
+): Promise<FollowMutationResult> {
+  if (!accessToken) {
+    return {
+      success: false,
+      status: 401,
+      detail: "Not authenticated",
+    };
+  }
+
+  const url = buildFollowUrl(username);
+
+  try {
+    const response = await fetch(url, {
+      method,
+      headers: {
+        Cookie: `access_token=${accessToken}`,
+      },
+      cache: "no-store",
+    });
+    let detail: string | null = null;
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (typeof payload?.detail === "string") {
+        detail = payload.detail;
+      }
+    } catch {
+      detail = null;
+    }
+
+    if (!response.ok) {
+      return {
+        success: false,
+        status: response.status,
+        detail,
+      };
+    }
+
+    return {
+      success: true,
+      status: response.status,
+      detail,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      status: 500,
+      detail: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+export function followUserRequest(
+  username: string,
+  accessToken?: string,
+): Promise<FollowMutationResult> {
+  return mutateFollow(username, "POST", accessToken);
+}
+
+export function unfollowUserRequest(
+  username: string,
+  accessToken?: string,
+): Promise<FollowMutationResult> {
+  return mutateFollow(username, "DELETE", accessToken);
 }
