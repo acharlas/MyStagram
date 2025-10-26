@@ -1,4 +1,4 @@
-import { apiServerFetch } from "./client";
+import { ApiError, apiServerFetch } from "./client";
 
 export type PostDetail = {
   id: number;
@@ -38,6 +38,9 @@ export async function fetchPostDetail(
       },
     });
   } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
     console.error("Failed to load post detail", error);
     return null;
   }
@@ -62,6 +65,9 @@ export async function fetchPostComments(
       },
     );
   } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return [];
+    }
     console.error("Failed to load post comments", error);
     return [];
   }

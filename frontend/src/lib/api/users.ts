@@ -1,4 +1,4 @@
-import { apiServerFetch } from "./client";
+import { ApiError, apiServerFetch } from "./client";
 
 export type UserProfile = {
   id: string;
@@ -53,6 +53,9 @@ export async function fetchUserProfile(
       headers: buildHeaders(accessToken),
     });
   } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
     console.error("Failed to load user profile", error);
     return null;
   }
@@ -71,6 +74,9 @@ export async function fetchUserPosts(
       },
     );
   } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return [];
+    }
     console.error("Failed to load user posts", error);
     return [];
   }

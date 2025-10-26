@@ -1,3 +1,13 @@
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message?: string) {
+    super(message ?? `API request failed with status ${status}`);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 export type ApiRequestOptions = RequestInit & {
   headers?: HeadersInit;
 };
@@ -32,7 +42,7 @@ export async function apiFetch<T = unknown>(
   });
 
   if (!response.ok) {
-    throw new Error(`API request failed with status ${response.status}`);
+    throw new ApiError(response.status);
   }
 
   return (await response.json()) as T;
