@@ -205,7 +205,7 @@ async def list_user_posts(
     posts_result = await session.execute(
         select(Post)
         .where(_eq(Post.author_id, author.id))
-        .order_by(Post.created_at.desc())
+        .order_by(Post.created_at.desc())  # type: ignore[attr-defined]
     )
     posts = posts_result.scalars().all()
 

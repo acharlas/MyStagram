@@ -1,16 +1,14 @@
 "use server";
 
 import { redirect } from "next/navigation";
-
-import { MAX_CAPTION_LENGTH, MAX_UPLOAD_BYTES } from "@/lib/constants";
 import { getSessionServer } from "@/lib/auth/session";
+import { MAX_CAPTION_LENGTH, MAX_UPLOAD_BYTES } from "@/lib/constants";
 
 type CreatePostResult = {
   id: number;
 };
 
-const BACKEND_BASE_URL =
-  process.env.BACKEND_API_URL ?? "http://backend:8000";
+const BACKEND_BASE_URL = process.env.BACKEND_API_URL ?? "http://backend:8000";
 
 export type UploadPostState = {
   error: string | null;
@@ -42,11 +40,11 @@ function isLikelyImage(file: File | null): boolean {
   if (!file) {
     return false;
   }
-  if (file.type && file.type.startsWith("image/")) {
+  if (file.type?.startsWith("image/")) {
     return true;
   }
   return Boolean(
-    file.name && file.name.match(/\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/iu),
+    file.name?.match(/\.(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/iu),
   );
 }
 
@@ -69,11 +67,19 @@ export async function createPostAction(
   }
 
   if (!isLikelyImage(file)) {
-    return buildState("Le fichier sélectionné n'est pas une image.", caption, true);
+    return buildState(
+      "Le fichier sélectionné n'est pas une image.",
+      caption,
+      true,
+    );
   }
 
   if (file.size > MAX_UPLOAD_BYTES) {
-    return buildState("Le fichier dépasse la taille maximale (2 Mo).", caption, true);
+    return buildState(
+      "Le fichier dépasse la taille maximale (2 Mo).",
+      caption,
+      true,
+    );
   }
 
   if (caption.length > MAX_CAPTION_LENGTH) {
@@ -104,7 +110,7 @@ export async function createPostAction(
     try {
       const payload = (await response.json()) as { detail?: string };
       backendMessage = payload.detail ?? backendMessage;
-    } catch (error) {
+    } catch (_error) {
       // ignore JSON parse issues
     }
     return buildState(backendMessage, caption, response.status >= 500);

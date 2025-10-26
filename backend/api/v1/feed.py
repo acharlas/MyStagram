@@ -31,8 +31,11 @@ async def home_feed(
             detail="User record missing identifier",
         )
 
+    post_entity = cast(Any, Post)
+    author_name_column = cast(ColumnElement[str | None], User.name)
+    author_username_column = cast(ColumnElement[str | None], User.username)
     result = await session.execute(
-        select(Post, User.name, User.username)
+        select(post_entity, author_name_column, author_username_column)
         .join(User, _eq(User.id, Post.author_id))
         .join(Follow, _eq(Follow.followee_id, Post.author_id))
         .where(_eq(Follow.follower_id, current_user.id))

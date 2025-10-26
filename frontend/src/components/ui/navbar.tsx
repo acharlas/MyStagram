@@ -34,8 +34,7 @@ export function NavBar({ username }: NavBarProps) {
             item.href === "/profile" && username
               ? `/users/${encodeURIComponent(username)}`
               : item.href;
-          const isActive =
-            pathname === href || pathname.startsWith(`${href}/`);
+          const isActive = pathname === href || pathname.startsWith(`${href}/`);
           return (
             <Link
               key={item.label}

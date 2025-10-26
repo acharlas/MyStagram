@@ -85,7 +85,9 @@ export default async function PostDetailPage({ params }: PostPageProps) {
               {comments.map((comment) => (
                 <li key={comment.id} className="text-sm text-zinc-200">
                   <span className="font-semibold text-zinc-100">
-                    {comment.author_name ?? comment.author_username ?? comment.author_id}
+                    {comment.author_name ??
+                      comment.author_username ??
+                      comment.author_id}
                   </span>
                   : {comment.text}
                 </li>

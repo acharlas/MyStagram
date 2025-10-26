@@ -5,10 +5,6 @@ import { notFound } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { FollowButton } from "@/components/user/FollowButton";
 import {
-  followUserAction,
-  unfollowUserAction,
-} from "./actions";
-import {
   fetchUserFollowers,
   fetchUserPosts,
   fetchUserProfile,
@@ -16,6 +12,7 @@ import {
 import { getSessionServer } from "@/lib/auth/session";
 import { buildImageUrl } from "@/lib/image";
 import { sanitizeHtml } from "@/lib/sanitize";
+import { followUserAction, unfollowUserAction } from "./actions";
 
 type UserProfilePageProps = {
   params: Promise<{ username: string }>;
@@ -80,9 +77,7 @@ export default async function UserProfilePage({
           {profile.name ? (
             <p className="text-sm text-zinc-300">{profile.name}</p>
           ) : null}
-          {safeBio ? (
-            <p className="text-sm text-zinc-400">{safeBio}</p>
-          ) : null}
+          {safeBio ? <p className="text-sm text-zinc-400">{safeBio}</p> : null}
           {!isOwnProfile && viewerUsername && accessToken ? (
             <FollowButton
               initiallyFollowing={isFollowing}

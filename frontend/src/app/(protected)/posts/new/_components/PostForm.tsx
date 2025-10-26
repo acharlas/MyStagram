@@ -1,11 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useFormState } from "react-dom";
-
-import { createPostAction } from "../actions";
-import type { UploadPostState } from "../actions";
 import { MAX_CAPTION_LENGTH, MAX_UPLOAD_BYTES } from "@/lib/constants";
+import type { UploadPostState } from "../actions";
+import { createPostAction } from "../actions";
 
 const IMAGE_EXTENSION_REGEX = /(\.)(png|jpe?g|gif|webp|bmp|heic|heif|avif)$/iu;
 
@@ -13,10 +13,10 @@ function isLikelyImage(file: File | null): boolean {
   if (!file) {
     return false;
   }
-  if (file.type && file.type.startsWith("image/")) {
+  if (file.type?.startsWith("image/")) {
     return true;
   }
-  return Boolean(file.name && IMAGE_EXTENSION_REGEX.test(file.name));
+  return Boolean(file.name?.match(IMAGE_EXTENSION_REGEX));
 }
 
 const INITIAL_STATE: UploadPostState = {
@@ -123,6 +123,7 @@ export function PostForm() {
           htmlFor="post-image"
           className="block text-sm font-medium text-zinc-200"
         >
+          Image de publication
         </label>
         <input
           id="post-image"
@@ -139,10 +140,13 @@ export function PostForm() {
 
       {previewUrl ? (
         <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
-          <img
+          <Image
             src={previewUrl}
             alt="Prévisualisation de la publication"
+            width={800}
+            height={800}
             className="w-full aspect-square object-cover rounded-2xl"
+            unoptimized
           />
         </div>
       ) : null}
@@ -152,6 +156,7 @@ export function PostForm() {
           htmlFor="post-caption"
           className="block text-sm font-medium text-zinc-200"
         >
+          Légende
         </label>
         <textarea
           id="post-caption"

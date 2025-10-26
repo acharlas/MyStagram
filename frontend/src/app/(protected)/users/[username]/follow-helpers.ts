@@ -9,8 +9,7 @@ export type FollowDependencies = {
   fetchImpl: typeof fetch;
 };
 
-const API_BASE_URL =
-  process.env.BACKEND_API_URL ?? "http://backend:8000";
+const API_BASE_URL = process.env.BACKEND_API_URL ?? "http://backend:8000";
 
 export async function performFollowMutation(
   username: string,

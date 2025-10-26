@@ -113,10 +113,13 @@ async def collect_like_meta(
     if not post_ids:
         return {}, set()
 
+    post_id_column = cast(ColumnElement[int], Like.post_id)
+    user_id_column = cast(ColumnElement[str], Like.user_id)
+    count_column = cast(Any, func.count(user_id_column))
     count_result = await session.execute(
-        select(Like.post_id, func.count(Like.user_id))
-        .where(Like.post_id.in_(post_ids))
-        .group_by(Like.post_id)
+        select(post_id_column, count_column)
+        .where(post_id_column.in_(post_ids))
+        .group_by(post_id_column)
     )
     count_map = {post_id: int(total) for post_id, total in count_result.all()}
 
@@ -124,9 +127,9 @@ async def collect_like_meta(
         return count_map, set()
 
     viewer_result = await session.execute(
-        select(Like.post_id).where(
-            _eq(Like.user_id, viewer_id),
-            Like.post_id.in_(post_ids),
+        select(post_id_column).where(
+            _eq(user_id_column, viewer_id),
+            post_id_column.in_(post_ids),
         )
     )
     liked_set = {row[0] for row in viewer_result.all()}
@@ -134,8 +137,11 @@ async def collect_like_meta(
 
 
 async def _get_like_count(session: AsyncSession, post_id: int) -> int:
+    post_id_column = cast(ColumnElement[int], Like.post_id)
+    user_id_column = cast(ColumnElement[str], Like.user_id)
+    count_column = cast(Any, func.count(user_id_column))
     result = await session.execute(
-        select(func.count(Like.user_id)).where(_eq(Like.post_id, post_id))
+        select(count_column).where(_eq(post_id_column, post_id))
     )
     count = result.scalar_one()
     return int(count or 0)
@@ -255,8 +261,11 @@ async def get_feed(
             detail="User record missing identifier",
         )
 
+    post_entity = cast(Any, Post)
+    author_name_column = cast(ColumnElement[str | None], User.name)
+    author_username_column = cast(ColumnElement[str | None], User.username)
     result = await session.execute(
-        select(Post, User.name, User.username)
+        select(post_entity, author_name_column, author_username_column)
         .join(User, _eq(User.id, Post.author_id))
         .join(Follow, _eq(Follow.followee_id, Post.author_id))
         .where(_eq(Follow.follower_id, current_user.id))
@@ -290,8 +299,11 @@ async def get_post(
             detail="User record missing identifier",
         )
 
+    post_entity = cast(Any, Post)
+    author_name_column = cast(ColumnElement[str | None], User.name)
+    author_username_column = cast(ColumnElement[str | None], User.username)
     result = await session.execute(
-        select(Post, User.name, User.username)
+        select(post_entity, author_name_column, author_username_column)
         .join(User, _eq(User.id, Post.author_id))
         .where(_eq(Post.id, post_id))
         .limit(1)
@@ -334,8 +346,9 @@ async def get_post_comments(
             detail="User record missing identifier",
         )
 
+    author_id_column = cast(ColumnElement[str], Post.author_id)
     post_author = await session.execute(
-        select(Post.author_id)
+        select(author_id_column)
         .where(_eq(Post.id, post_id))
         .limit(1)
     )
@@ -346,11 +359,14 @@ async def get_post_comments(
     if not await _user_can_view_post(session, viewer_id, post_author_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
+    comment_entity = cast(Any, Comment)
+    author_name_column = cast(ColumnElement[str | None], User.name)
+    author_username_column = cast(ColumnElement[str | None], User.username)
     result = await session.execute(
-        select(Comment, User.name, User.username)
+        select(comment_entity, author_name_column, author_username_column)
         .join(User, _eq(User.id, Comment.author_id))
         .where(_eq(Comment.post_id, post_id))
-        .order_by(Comment.created_at.asc())
+        .order_by(Comment.created_at.asc())  # type: ignore[attr-defined]
     )
     rows = result.all()
     return [
@@ -381,8 +397,9 @@ async def create_comment(
             detail="User record missing identifier",
         )
 
+    author_id_column = cast(ColumnElement[str], Post.author_id)
     post_author = await session.execute(
-        select(Post.author_id)
+        select(author_id_column)
         .where(_eq(Post.id, post_id))
         .limit(1)
     )
@@ -430,8 +447,9 @@ async def like_post(
             detail="User record missing identifier",
         )
 
+    author_id_column = cast(ColumnElement[str], Post.author_id)
     post_author = await session.execute(
-        select(Post.author_id)
+        select(author_id_column)
         .where(_eq(Post.id, post_id))
         .limit(1)
     )
@@ -442,8 +460,13 @@ async def like_post(
     if not await _user_can_view_post(session, viewer_id, post_author_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
+    like_entity = cast(Any, Like)
+    user_id_column = cast(ColumnElement[str], Like.user_id)
+    post_id_column = cast(ColumnElement[int], Like.post_id)
     existing_like = await session.execute(
-        select(Like).where(_eq(Like.user_id, viewer_id), _eq(Like.post_id, post_id))
+        select(like_entity).where(
+            _eq(user_id_column, viewer_id), _eq(post_id_column, post_id)
+        )
     )
     like_obj = existing_like.scalar_one_or_none()
     if like_obj is None:
@@ -467,8 +490,9 @@ async def unlike_post(
             detail="User record missing identifier",
         )
 
+    author_id_column = cast(ColumnElement[str], Post.author_id)
     post_author = await session.execute(
-        select(Post.author_id)
+        select(author_id_column)
         .where(_eq(Post.id, post_id))
         .limit(1)
     )
@@ -479,8 +503,13 @@ async def unlike_post(
     if not await _user_can_view_post(session, viewer_id, post_author_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
+    like_entity = cast(Any, Like)
+    user_id_column = cast(ColumnElement[str], Like.user_id)
+    post_id_column = cast(ColumnElement[int], Like.post_id)
     existing_like = await session.execute(
-        select(Like).where(_eq(Like.user_id, viewer_id), _eq(Like.post_id, post_id))
+        select(like_entity).where(
+            _eq(user_id_column, viewer_id), _eq(post_id_column, post_id)
+        )
     )
     like_obj = existing_like.scalar_one_or_none()
     if like_obj is not None:

@@ -7,9 +7,9 @@ vi.mock("../../lib/api/client", () => ({
 
 import { apiServerFetch } from "../../lib/api/client";
 import {
+  createPostComment,
   fetchPostComments,
   fetchPostDetail,
-  createPostComment,
   likePostRequest,
   unlikePostRequest,
 } from "../../lib/api/posts";
@@ -105,7 +105,10 @@ describe("fetchPostComments", () => {
 
 describe("likePostRequest", () => {
   it("sends POST to like endpoint", async () => {
-    apiServerFetchMock.mockResolvedValueOnce({ detail: "Liked", like_count: 5 });
+    apiServerFetchMock.mockResolvedValueOnce({
+      detail: "Liked",
+      like_count: 5,
+    });
     const result = await likePostRequest("42", "token123");
     expect(result).toBe(5);
     expect(apiServerFetchMock).toHaveBeenCalledWith(
@@ -128,7 +131,10 @@ describe("likePostRequest", () => {
 
 describe("unlikePostRequest", () => {
   it("sends DELETE to unlike endpoint", async () => {
-    apiServerFetchMock.mockResolvedValueOnce({ detail: "Unliked", like_count: 4 });
+    apiServerFetchMock.mockResolvedValueOnce({
+      detail: "Unliked",
+      like_count: 4,
+    });
     const result = await unlikePostRequest("42", "token123");
     expect(result).toBe(4);
     expect(apiServerFetchMock).toHaveBeenCalledWith(

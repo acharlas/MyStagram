@@ -13,10 +13,7 @@ export async function POST(request: Request, route: RouteParams) {
   const accessToken = (token?.accessToken as string | undefined) ?? undefined;
 
   if (!accessToken) {
-    return NextResponse.json(
-      { detail: "Not authenticated" },
-      { status: 401 },
-    );
+    return NextResponse.json({ detail: "Not authenticated" }, { status: 401 });
   }
 
   const { text } = (await request.json().catch(() => ({}))) as {

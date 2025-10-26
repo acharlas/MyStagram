@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 
-import {
-  likePostRequest,
-  unlikePostRequest,
-} from "@/lib/api/posts";
+import { likePostRequest, unlikePostRequest } from "@/lib/api/posts";
 import { getSessionServer } from "@/lib/auth/session";
 
 type RouteParams = {
@@ -16,10 +13,7 @@ export async function POST(_: Request, route: RouteParams) {
   const accessToken = session?.accessToken as string | undefined;
 
   if (!accessToken) {
-    return NextResponse.json(
-      { detail: "Not authenticated" },
-      { status: 401 },
-    );
+    return NextResponse.json({ detail: "Not authenticated" }, { status: 401 });
   }
 
   const likeCount = await likePostRequest(postId, accessToken);
@@ -41,10 +35,7 @@ export async function DELETE(_: Request, route: RouteParams) {
   const accessToken = session?.accessToken as string | undefined;
 
   if (!accessToken) {
-    return NextResponse.json(
-      { detail: "Not authenticated" },
-      { status: 401 },
-    );
+    return NextResponse.json({ detail: "Not authenticated" }, { status: 401 });
   }
 
   const likeCount = await unlikePostRequest(postId, accessToken);

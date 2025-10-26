@@ -48,9 +48,7 @@ export function LikeButton({
     const method = nextLiked ? "POST" : "DELETE";
     startTransition(async () => {
       setLiked(nextLiked);
-      setCount((prev) =>
-        Math.max(0, prev + (nextLiked ? 1 : -1)),
-      );
+      setCount((prev) => Math.max(0, prev + (nextLiked ? 1 : -1)));
       try {
         const response = await fetch(`/api/posts/${postId}/likes`, {
           method,
@@ -59,9 +57,9 @@ export function LikeButton({
         if (!response.ok) {
           throw new Error("Request failed");
         }
-        const data = (await response.json().catch(() => null)) as
-          | { like_count?: number }
-          | null;
+        const data = (await response.json().catch(() => null)) as {
+          like_count?: number;
+        } | null;
         if (typeof data?.like_count === "number") {
           setCount(data.like_count);
         }
