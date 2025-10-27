@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { signOut } from "next-auth/react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { searchUsers, type UserProfilePublic } from "@/lib/api/users";
 import { buildImageUrl } from "@/lib/image";
@@ -34,6 +34,7 @@ export function NavBar({ username }: NavBarProps) {
   const [searchResults, setSearchResults] = useState<UserProfilePublic[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -107,7 +108,29 @@ export function NavBar({ username }: NavBarProps) {
     }
   };
 
+  const handleLogout = async () => {
+    if (isLoggingOut) {
+      return;
+    }
+    setIsLoggingOut(true);
+    try {
+      const response = await fetch("/api/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!response.ok) {
+        console.error("Logout endpoint responded with", response.status);
+      }
+    } catch (error) {
+      console.error("Failed to call logout endpoint", error);
+    } finally {
+      await signOut({ callbackUrl: "/login" });
+      setIsLoggingOut(false);
+    }
+  };
+
   const hasSearchValue = searchQuery.trim().length > 0;
+  const viewerName = username ?? "invité";
 
   return (
     <aside className="sticky top-0 flex h-screen w-56 flex-col border-r border-zinc-800 bg-zinc-950 p-6 text-zinc-100">
@@ -278,7 +301,21 @@ export function NavBar({ username }: NavBarProps) {
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-700 text-lg">
           ☺
         </div>
-        <span>{username ?? "invité"}</span>
+        <div className="flex flex-1 items-center gap-2 overflow-hidden">
+          <span className="flex-1 truncate">{viewerName}</span>
+          {username ? (
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+              className="rounded-full border border-transparent p-1 text-zinc-400 transition hover:border-zinc-600 hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="Se déconnecter"
+              title="Se déconnecter"
+            >
+              <span aria-hidden>🚪</span>
+            </button>
+          ) : null}
+        </div>
       </footer>
     </aside>
   );

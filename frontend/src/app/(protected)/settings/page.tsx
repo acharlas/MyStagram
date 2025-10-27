@@ -92,11 +92,7 @@ export default async function SettingsPage() {
         </p>
       </header>
 
-      <form
-        action={updateProfileAction}
-        className="space-y-5"
-        encType="multipart/form-data"
-      >
+      <form action={updateProfileAction} className="space-y-5">
         <input type="hidden" name="username" value={profile.username} />
         <div className="space-y-1">
           <label
