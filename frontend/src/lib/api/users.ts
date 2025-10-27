@@ -1,4 +1,4 @@
-import { ApiError, apiServerFetch } from "./client";
+import { ApiError, apiFetch, apiServerFetch } from "./client";
 
 export type UserProfile = {
   id: string;
@@ -175,4 +175,44 @@ export function unfollowUserRequest(
   accessToken?: string,
 ): Promise<FollowMutationResult> {
   return mutateFollow(username, "DELETE", accessToken);
+}
+
+export async function searchUsers(
+  query: string,
+  {
+    limit = 10,
+    signal,
+  }: {
+    limit?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<UserProfilePublic[]> {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const params = new URLSearchParams();
+  params.set("q", trimmed);
+  params.set("limit", String(limit));
+  const url = `/api/users/search?${params.toString()}`;
+
+  try {
+    return await apiFetch<UserProfilePublic[]>(url, {
+      cache: "no-store",
+      credentials: "include",
+      signal,
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (error.status === 404) {
+        return [];
+      }
+      if (error.status === 401) {
+        console.warn("User search attempted without authentication.");
+        return [];
+      }
+    }
+    throw error;
+  }
 }
