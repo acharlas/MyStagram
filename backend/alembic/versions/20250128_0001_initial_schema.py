@@ -1,4 +1,4 @@
-"""Initial schema for Instragram core tables."""
+"""Initial schema for mystagram core tables."""
 
 from collections.abc import Sequence
 

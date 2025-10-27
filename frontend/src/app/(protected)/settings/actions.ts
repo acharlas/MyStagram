@@ -31,7 +31,9 @@ export async function updateProfileAction(
   const accessToken = session?.accessToken as string | undefined;
   const sessionUser = session?.user as { username?: string } | undefined;
   const sessionUsername =
-    typeof sessionUser?.username === "string" ? sessionUser.username : undefined;
+    typeof sessionUser?.username === "string"
+      ? sessionUser.username
+      : undefined;
 
   if (!accessToken) {
     return {

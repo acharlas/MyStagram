@@ -1,9 +1,14 @@
-import type { Mock } from "vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../lib/api/client", () => ({
-  apiServerFetch: vi.fn(),
-}));
+vi.mock("../../lib/api/client", async () => {
+  const actual = await vi.importActual<typeof import("../../lib/api/client")>(
+    "../../lib/api/client",
+  );
+  return {
+    ...actual,
+    apiServerFetch: vi.fn(),
+  };
+});
 
 import { apiServerFetch } from "../../lib/api/client";
 import {
@@ -14,7 +19,7 @@ import {
   unlikePostRequest,
 } from "../../lib/api/posts";
 
-const apiServerFetchMock = apiServerFetch as unknown as Mock;
+const apiServerFetchMock = vi.mocked(apiServerFetch);
 
 afterEach(() => {
   vi.clearAllMocks();

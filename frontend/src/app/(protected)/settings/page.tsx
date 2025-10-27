@@ -1,8 +1,11 @@
 import { getServerSession } from "next-auth";
 
-import { ApiError, apiServerFetch } from "@/lib/api/client";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ApiError, apiServerFetch } from "@/lib/api/client";
+import { buildImageUrl } from "@/lib/image";
+import { updateProfileAction } from "./actions";
+import { CharacterCountField } from "./CharacterCountField";
 import {
   SETTINGS_ALLOWED_AVATAR_MIME_TYPES,
   SETTINGS_AVATAR_SIZE_UNIT,
@@ -10,10 +13,6 @@ import {
   SETTINGS_DISPLAY_NAME_MAX_LENGTH,
   SETTINGS_MAX_AVATAR_SIZE_BYTES,
 } from "./constants";
-import { updateProfileAction } from "./actions";
-import { CharacterCountField } from "./CharacterCountField";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { buildImageUrl } from "@/lib/image";
 
 type CurrentUserProfile = {
   username: string;
@@ -76,7 +75,6 @@ export default async function SettingsPage() {
     .join("")
     .slice(0, 2)
     .toUpperCase();
-  const allowedFormatsLabel = SETTINGS_ALLOWED_AVATAR_MIME_TYPES.join(", ");
   const acceptedAvatarTypes = SETTINGS_ALLOWED_AVATAR_MIME_TYPES.join(",");
   const maxAvatarSizeMb =
     SETTINGS_MAX_AVATAR_SIZE_BYTES / SETTINGS_AVATAR_SIZE_UNIT;

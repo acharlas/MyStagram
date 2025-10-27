@@ -33,7 +33,7 @@ SEED_USERS = [
         "username": "demo_alex",
         "email": "alex@example.com",
         "name": "Alex Demo",
-        "bio": "Trying out Instragram!",
+        "bio": "Trying out mystagram!",
     },
     {
         "username": "demo_bella",

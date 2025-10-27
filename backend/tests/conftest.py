@@ -1,4 +1,4 @@
-"""Pytest fixtures for the Instragram backend."""
+"""Pytest fixtures for the mystagram backend."""
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator

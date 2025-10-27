@@ -73,10 +73,8 @@ describe("apiServerFetch", () => {
     // @ts-expect-error force window for test
     globalThis.window = {} as Window;
 
-    await expect(
-      apiServerFetch("/api/test"),
-    ).rejects.toThrowErrorMatchingInlineSnapshot(
-      "\"apiServerFetch can only be invoked on the server\"",
+    await expect(apiServerFetch("/api/test")).rejects.toThrowError(
+      "apiServerFetch can only be invoked on the server",
     );
 
     if (hadWindow) {

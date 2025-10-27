@@ -17,9 +17,7 @@ function isPublicAsset(pathname: string) {
 }
 
 function isPublicApi(pathname: string) {
-  return (
-    pathname.startsWith("/api/auth") || pathname.startsWith("/api/public")
-  );
+  return pathname.startsWith("/api/auth") || pathname.startsWith("/api/public");
 }
 
 async function readSessionToken(request: NextRequest) {

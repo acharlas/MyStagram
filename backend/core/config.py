@@ -32,11 +32,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = Field(default="Instragram API")
+    app_name: str = Field(default="mystagram API")
     app_env: str = Field(default="local", alias="APP_ENV")
     debug: bool = Field(default=False, alias="DEBUG")
 
-    secret_key: str = Field(default="instragram-demo-secret", alias="SECRET_KEY")
+    secret_key: str = Field(default="mystagram-demo-secret", alias="SECRET_KEY")
 
     database_url: str = Field(
         default="postgresql+asyncpg://app:app@postgres:5432/instagram",

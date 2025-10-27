@@ -14,5 +14,8 @@ export function sanitizeHtml(input: string): string {
     return "";
   }
 
-  return input.replace(HTML_ESCAPE_REGEX, (char) => HTML_ESCAPE_MAP[char] ?? char);
+  return input.replace(
+    HTML_ESCAPE_REGEX,
+    (char) => HTML_ESCAPE_MAP[char] ?? char,
+  );
 }

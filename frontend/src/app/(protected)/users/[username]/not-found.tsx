@@ -8,8 +8,8 @@ export default function UserNotFoundPage() {
           Utilisateur introuvable
         </h1>
         <p className="text-sm text-zinc-400">
-          Nous n&apos;avons pas pu trouver ce profil. Vérifiez l&apos;orthographe
-          ou essayez un autre nom d&apos;utilisateur.
+          Nous n&apos;avons pas pu trouver ce profil. Vérifiez
+          l&apos;orthographe ou essayez un autre nom d&apos;utilisateur.
         </p>
       </div>
       <Link

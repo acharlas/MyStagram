@@ -1,7 +1,7 @@
+import { getServerSession } from "next-auth";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getServerSession } from "next-auth";
 import { ApiError, apiServerFetch } from "@/lib/api/client";
 import SettingsPage from "../../app/(protected)/settings/page";
 
@@ -9,11 +9,27 @@ vi.mock("next-auth", () => ({
   getServerSession: vi.fn(),
 }));
 
+vi.mock("@/app/api/auth/[...nextauth]/route", () => ({
+  authOptions: {},
+}));
+
+vi.mock("@/components/ui/avatar", () => ({
+  Avatar: ({ children }: { children: React.ReactNode }) =>
+    React.createElement("div", { "data-avatar": true }, children),
+  AvatarImage: (props: React.ImgHTMLAttributes<HTMLImageElement>) =>
+    React.createElement("img", { "data-avatar-image": true, ...props }),
+  AvatarFallback: ({ children }: { children: React.ReactNode }) =>
+    React.createElement("span", { "data-avatar-fallback": true }, children),
+}));
+
+vi.mock("@/lib/image", () => ({
+  buildImageUrl: (key: string) => `mocked://${key}`,
+}));
+
 vi.mock("@/lib/api/client", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/api/client")>(
-      "@/lib/api/client"
-    );
+  const actual = await vi.importActual<typeof import("../../lib/api/client")>(
+    "../../lib/api/client",
+  );
   return {
     ...actual,
     apiServerFetch: vi.fn(),
