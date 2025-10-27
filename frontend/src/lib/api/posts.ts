@@ -22,11 +22,15 @@ export type PostComment = {
 
 export type CreatedComment = PostComment;
 
+function isValidPostId(postId: string): boolean {
+  return /^\d+$/.test(postId);
+}
+
 export async function fetchPostDetail(
   postId: string,
   accessToken?: string,
 ): Promise<PostDetail | null> {
-  if (!accessToken) {
+  if (!accessToken || !isValidPostId(postId)) {
     return null;
   }
 
@@ -50,7 +54,7 @@ export async function fetchPostComments(
   postId: string,
   accessToken?: string,
 ): Promise<PostComment[]> {
-  if (!accessToken) {
+  if (!accessToken || !isValidPostId(postId)) {
     return [];
   }
 
