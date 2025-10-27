@@ -2,43 +2,71 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const PUBLIC_PATHS = new Set(["/login", "/register"]);
+const AUTH_PAGES = new Set(["/login", "/register"]);
+const PUBLIC_FILE_PATHS = new Set(["/favicon.ico", "/site.webmanifest"]);
 
-function isPublicPath(pathname: string) {
+function normalizePathname(pathname: string) {
+  if (pathname === "/") {
+    return pathname;
+  }
+  return pathname.replace(/\/+$/u, "") || "/";
+}
+
+function isPublicAsset(pathname: string) {
+  return pathname.startsWith("/_next/") || PUBLIC_FILE_PATHS.has(pathname);
+}
+
+function isPublicApi(pathname: string) {
   return (
-    PUBLIC_PATHS.has(pathname) ||
-    pathname.startsWith("/api/auth") ||
-    pathname.startsWith("/api/public")
+    pathname.startsWith("/api/auth") || pathname.startsWith("/api/public")
   );
 }
 
-export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-
-  if (isPublicPath(pathname)) {
-    return NextResponse.next();
-  }
-
-  let token = null;
+async function readSessionToken(request: NextRequest) {
   try {
-    // Use NextAuth JWT session so forged cookies cannot bypass protection.
-    token = await getToken({
+    return await getToken({
       req: request,
       secret: process.env.NEXTAUTH_SECRET,
     });
   } catch (error) {
     console.warn("Failed to read session token", error);
+    return null;
+  }
+}
+
+function buildLoginRedirect(request: NextRequest) {
+  const redirectUrl = new URL("/login", request.url);
+  const from = `${request.nextUrl.pathname}${request.nextUrl.search}`;
+  if (from && from !== "/") {
+    redirectUrl.searchParams.set("from", from);
+  }
+  return redirectUrl;
+}
+
+export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const normalizedPath = normalizePathname(pathname);
+
+  if (isPublicAsset(pathname) || isPublicApi(pathname)) {
+    return NextResponse.next();
   }
 
+  if (AUTH_PAGES.has(normalizedPath)) {
+    const token = await readSessionToken(request);
+    if (token) {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+    return NextResponse.next();
+  }
+
+  const token = await readSessionToken(request);
   if (!token) {
-    const redirectUrl = new URL("/login", request.url);
-    redirectUrl.searchParams.set("from", pathname);
-    return NextResponse.redirect(redirectUrl);
+    return NextResponse.redirect(buildLoginRedirect(request));
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|site.webmanifest).*)"],
+  matcher: ["/((?!_next/|favicon.ico|site.webmanifest).*)"],
 };
