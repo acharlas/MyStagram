@@ -1,4 +1,4 @@
-import { apiServerFetch } from "./client";
+import { ApiError, apiServerFetch } from "./client";
 
 export type PostDetail = {
   id: number;
@@ -22,11 +22,15 @@ export type PostComment = {
 
 export type CreatedComment = PostComment;
 
+function isValidPostId(postId: string): boolean {
+  return /^\d+$/.test(postId);
+}
+
 export async function fetchPostDetail(
   postId: string,
   accessToken?: string,
 ): Promise<PostDetail | null> {
-  if (!accessToken) {
+  if (!accessToken || !isValidPostId(postId)) {
     return null;
   }
 
@@ -38,6 +42,9 @@ export async function fetchPostDetail(
       },
     });
   } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
     console.error("Failed to load post detail", error);
     return null;
   }
@@ -47,7 +54,7 @@ export async function fetchPostComments(
   postId: string,
   accessToken?: string,
 ): Promise<PostComment[]> {
-  if (!accessToken) {
+  if (!accessToken || !isValidPostId(postId)) {
     return [];
   }
 
@@ -62,6 +69,9 @@ export async function fetchPostComments(
       },
     );
   } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return [];
+    }
     console.error("Failed to load post comments", error);
     return [];
   }

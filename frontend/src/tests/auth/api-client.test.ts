@@ -7,10 +7,9 @@ const originalFetch = globalThis.fetch;
 vi.mock("next/headers", () => ({
   cookies: () =>
     Promise.resolve({
-      getAll: () => [
-        { name: "next-auth.session-token", value: "session123" },
-        { name: "custom", value: "value" },
-      ],
+      get: (name: string) =>
+        name === "access_token" ? { name, value: "session-token" } : undefined,
+      getAll: () => [],
     }),
 }));
 
@@ -26,16 +25,35 @@ describe("apiServerFetch", () => {
     vi.restoreAllMocks();
   });
 
-  it("merges cookies when calling backend", async () => {
+  it("adds bearer header from session cookie", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ hello: "world" }),
     });
     globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 
+    await apiServerFetch("/api/test");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://backend:8000/api/test",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer session-token",
+        }),
+      }),
+    );
+  });
+
+  it("respects explicit authorization header", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true }),
+    });
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
     await apiServerFetch("/api/test", {
       headers: {
-        Cookie: "access_token=session-token",
+        Authorization: "Bearer custom-token",
       },
     });
 
@@ -43,10 +61,27 @@ describe("apiServerFetch", () => {
       "http://backend:8000/api/test",
       expect.objectContaining({
         headers: expect.objectContaining({
-          Cookie:
-            "access_token=session-token; next-auth.session-token=session123; custom=value",
+          Authorization: "Bearer custom-token",
         }),
       }),
     );
+  });
+
+  it("throws when invoked on the client", async () => {
+    const hadWindow = "window" in globalThis;
+    const originalWindow = (globalThis as { window?: Window }).window;
+    // @ts-expect-error force window for test
+    globalThis.window = {} as Window;
+
+    await expect(apiServerFetch("/api/test")).rejects.toThrowError(
+      "apiServerFetch can only be invoked on the server",
+    );
+
+    if (hadWindow) {
+      globalThis.window = originalWindow;
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (globalThis as { window?: Window }).window;
+    }
   });
 });

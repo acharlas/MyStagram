@@ -67,7 +67,7 @@ export function RegisterForm({ action }: RegisterFormProps) {
             Créer un compte
           </h1>
           <p className="text-sm text-zinc-400">
-            Rejoignez Instragram et commencez à partager dès maintenant.
+            Rejoignez mystagram et commencez à partager dès maintenant.
           </p>
         </header>
 

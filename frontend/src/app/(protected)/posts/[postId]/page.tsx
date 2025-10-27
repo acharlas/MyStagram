@@ -1,4 +1,6 @@
 import Image from "next/image";
+import Link from "next/link";
+
 import { CommentForm } from "@/components/post/CommentForm";
 import { LikeButton } from "@/components/post/LikeButton";
 import { fetchPostComments, fetchPostDetail } from "@/lib/api/posts";
@@ -47,6 +49,7 @@ export default async function PostDetailPage({ params }: PostPageProps) {
 
   const authorLabel =
     post.author_name ?? post.author_username ?? post.author_id;
+  const authorUsername = post.author_username ?? undefined;
   const imageUrl = buildImageUrl(post.image_key);
   const safeCaption = post.caption ? sanitizeHtml(post.caption) : "";
 
@@ -71,7 +74,16 @@ export default async function PostDetailPage({ params }: PostPageProps) {
         className="flex max-h-full flex-col rounded-2xl border border-zinc-800 bg-zinc-900 p-4 md:w-96 md:flex-none md:rounded-l-none md:border-l-0"
       >
         <header className="mb-4 border-b border-zinc-800 pb-3">
-          <p className="text-sm font-semibold text-zinc-100">{authorLabel}</p>
+          {authorUsername ? (
+            <Link
+              href={`/users/${encodeURIComponent(authorUsername)}`}
+              className="text-sm font-semibold text-zinc-100 transition hover:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
+            >
+              {authorLabel}
+            </Link>
+          ) : (
+            <p className="text-sm font-semibold text-zinc-100">{authorLabel}</p>
+          )}
           <p className="mt-2 text-sm text-zinc-200">
             {safeCaption || "Aucune légende"}
           </p>
@@ -82,16 +94,31 @@ export default async function PostDetailPage({ params }: PostPageProps) {
             <p className="text-sm text-zinc-500">Pas encore de commentaires.</p>
           ) : (
             <ul className="flex flex-col gap-3">
-              {comments.map((comment) => (
-                <li key={comment.id} className="text-sm text-zinc-200">
-                  <span className="font-semibold text-zinc-100">
-                    {comment.author_name ??
-                      comment.author_username ??
-                      comment.author_id}
-                  </span>
-                  : {comment.text}
-                </li>
-              ))}
+              {comments.map((comment) => {
+                const commentAuthorLabel =
+                  comment.author_name ??
+                  comment.author_username ??
+                  comment.author_id;
+                const commentAuthorUsername =
+                  comment.author_username ?? undefined;
+                return (
+                  <li key={comment.id} className="text-sm text-zinc-200">
+                    {commentAuthorUsername ? (
+                      <Link
+                        href={`/users/${encodeURIComponent(commentAuthorUsername)}`}
+                        className="font-semibold text-zinc-100 transition hover:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
+                      >
+                        {commentAuthorLabel}
+                      </Link>
+                    ) : (
+                      <span className="font-semibold text-zinc-100">
+                        {commentAuthorLabel}
+                      </span>
+                    )}
+                    : {comment.text}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

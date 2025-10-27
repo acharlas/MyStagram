@@ -57,7 +57,7 @@ export function LoginForm() {
         <header className="space-y-1">
           <h1 className="text-xl font-semibold text-zinc-100">Se connecter</h1>
           <p className="text-sm text-zinc-400">
-            Utilisez vos identifiants Instragram pour continuer
+            Utilisez vos identifiants mystagram pour continuer
           </p>
         </header>
 

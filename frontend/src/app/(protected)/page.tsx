@@ -50,6 +50,7 @@ function PostCard({ post }: { post: FeedPost }) {
   const imageUrl = buildImageUrl(post.image_key);
   const displayName =
     post.author_name ?? post.author_username ?? post.author_id;
+  const authorUsername = post.author_username ?? undefined;
   const initials = displayName
     .split(/\s+/u)
     .filter(Boolean)
@@ -60,19 +61,28 @@ function PostCard({ post }: { post: FeedPost }) {
 
   return (
     <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+      <header className="flex items-center gap-2">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 text-sm font-semibold text-zinc-200">
+          {initials || displayName.slice(0, 2).toUpperCase()}
+        </div>
+        <div className="text-sm">
+          {authorUsername ? (
+            <Link
+              href={`/users/${encodeURIComponent(authorUsername)}`}
+              className="font-semibold text-zinc-100 transition hover:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
+            >
+              {displayName}
+            </Link>
+          ) : (
+            <p className="font-semibold text-zinc-100">{displayName}</p>
+          )}
+        </div>
+      </header>
+
       <Link
         href={`/posts/${post.id}`}
-        className="block space-y-3 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
+        className="mt-3 block focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
       >
-        <header className="flex items-center gap-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 text-sm font-semibold text-zinc-200">
-            {initials || displayName.slice(0, 2).toUpperCase()}
-          </div>
-          <div className="text-sm">
-            <p className="font-semibold text-zinc-100">{displayName}</p>
-          </div>
-        </header>
-
         <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-zinc-800">
           <Image
             src={imageUrl}
@@ -83,13 +93,13 @@ function PostCard({ post }: { post: FeedPost }) {
             unoptimized
           />
         </div>
-
-        {safeCaption ? (
-          <p className="text-sm text-zinc-200">{safeCaption}</p>
-        ) : (
-          <p className="text-sm text-zinc-500">Aucune légende</p>
-        )}
       </Link>
+
+      {safeCaption ? (
+        <p className="mt-3 text-sm text-zinc-200">{safeCaption}</p>
+      ) : (
+        <p className="mt-3 text-sm text-zinc-500">Aucune légende</p>
+      )}
 
       <footer className="mt-4 flex items-center gap-3 text-zinc-300">
         <LikeButton

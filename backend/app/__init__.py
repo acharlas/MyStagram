@@ -1,4 +1,4 @@
-"""Application entrypoint helpers for Instragram."""
+"""Application entrypoint helpers for mystagram."""
 
 from .main import app, create_app
 

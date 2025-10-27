@@ -10,9 +10,15 @@ import {
 
 const apiServerFetchMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../../lib/api/client", () => ({
-  apiServerFetch: apiServerFetchMock,
-}));
+vi.mock("../../lib/api/client", async () => {
+  const actual = await vi.importActual<typeof import("../../lib/api/client")>(
+    "../../lib/api/client",
+  );
+  return {
+    ...actual,
+    apiServerFetch: apiServerFetchMock,
+  };
+});
 
 const ORIGINAL_BACKEND_URL = process.env.BACKEND_API_URL;
 
