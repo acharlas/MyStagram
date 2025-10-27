@@ -4,6 +4,15 @@ mystagram is a lightweight Instagram-style demo that focuses on the essentials: 
 
 ---
 
+## Screenshots
+
+![Login page for MyStagram](docs/MyStagram_Login.png)
+![Home feed with search results](docs/MyStagram_Feed_Search.png)
+![Create new post flow](docs/MyStagram_NewPost.png)
+![User profile view](docs/MyStagram_Profile.png)
+
+---
+
 ## Project Overview
 
 - **Backend** — FastAPI application that exposes REST endpoints, handles authentication, and processes media.
