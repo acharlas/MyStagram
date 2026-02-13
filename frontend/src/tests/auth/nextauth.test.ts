@@ -1,6 +1,7 @@
 import type * as nextAuth from "next-auth";
 import type { NextAuthOptions } from "next-auth";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { createHmac } from "node:crypto";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import * as authModule from "../../app/api/auth/[...nextauth]/route";
 import { getSessionServer } from "../../lib/auth/session";
@@ -15,6 +16,7 @@ type CredentialsProvider = {
 
 let authOptions: NextAuthOptions;
 let credentialsProvider: CredentialsProvider;
+const ORIGINAL_RATE_LIMIT_PROXY_SECRET = process.env.RATE_LIMIT_PROXY_SECRET;
 
 function buildJwtWithExp(exp: number): string {
   const header = Buffer.from(
@@ -27,6 +29,7 @@ function buildJwtWithExp(exp: number): string {
 beforeAll(() => {
   process.env.BACKEND_API_URL = "http://backend:8000";
   process.env.NEXTAUTH_SECRET = "test-secret";
+  process.env.RATE_LIMIT_PROXY_SECRET = "test-rate-limit-secret";
   authOptions = authModule.authOptions;
   credentialsProvider = authOptions.providers.find(
     (provider): provider is CredentialsProvider =>
@@ -35,6 +38,10 @@ beforeAll(() => {
   if (!credentialsProvider) {
     throw new Error("Credentials provider not found");
   }
+});
+
+afterAll(() => {
+  process.env.RATE_LIMIT_PROXY_SECRET = ORIGINAL_RATE_LIMIT_PROXY_SECRET;
 });
 
 afterEach(() => {
@@ -67,7 +74,7 @@ describe("authorizeWithCredentials", () => {
       accessToken: "access-token",
       refreshToken: "refresh-token",
     });
-    expect(login).toHaveBeenCalledWith("string", "stringst");
+    expect(login).toHaveBeenCalledWith("string", "stringst", null);
     expect(profile).toHaveBeenCalledWith("access-token");
   });
 
@@ -81,7 +88,7 @@ describe("authorizeWithCredentials", () => {
     );
 
     expect(result).toBeNull();
-    expect(login).toHaveBeenCalledWith("string", "wrong");
+    expect(login).toHaveBeenCalledWith("string", "wrong", null);
     expect(profile).not.toHaveBeenCalled();
   });
 
@@ -98,7 +105,7 @@ describe("authorizeWithCredentials", () => {
     );
 
     expect(result).toBeNull();
-    expect(login).toHaveBeenCalledWith("string", "stringst");
+    expect(login).toHaveBeenCalledWith("string", "stringst", null);
     expect(profile).toHaveBeenCalledWith("access-token");
   });
 
@@ -115,6 +122,7 @@ describe("authorizeWithCredentials", () => {
     expect(login).not.toHaveBeenCalled();
     expect(profile).not.toHaveBeenCalled();
   });
+
 });
 
 describe("HTTP helper functions", () => {
@@ -139,6 +147,39 @@ describe("HTTP helper functions", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ username: "string", password: "stringst" }),
+      }),
+    );
+  });
+
+  it("loginWithCredentials forwards proxy client key when provided", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: "access-token",
+        refresh_token: "refresh-token",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await authModule.loginWithCredentialsWithClientKey(
+      "string",
+      "stringst",
+      "CLIENTKEYAAAAAAAA",
+    );
+
+    const expectedSignature = createHmac("sha256", "test-rate-limit-secret")
+      .update("CLIENTKEYAAAAAAAA")
+      .digest("hex");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://backend:8000/api/v1/auth/login",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-RateLimit-Client": "CLIENTKEYAAAAAAAA",
+          "X-RateLimit-Signature": expectedSignature,
+        },
       }),
     );
   });
@@ -314,7 +355,7 @@ describe("JWT and session callbacks", () => {
     );
   });
 
-  it("keeps token state after first 401 refresh failure for retry", async () => {
+  it("invalidates token on 401 refresh failure", async () => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
     const fetchMock = vi.fn().mockResolvedValue({
@@ -336,20 +377,22 @@ describe("JWT and session callbacks", () => {
     } as never);
 
     expect(jwt).toMatchObject({
-      accessToken: expiredAccessToken,
-      refreshToken: "refresh-token-fail",
-      error: undefined,
-      refresh401FailureCount: 1,
+      accessToken: undefined,
+      refreshToken: undefined,
+      error: "RefreshAccessTokenError",
     });
   });
 
-  it("invalidates token after repeated 401 refresh failures", async () => {
+  it("refreshes again on later expiry checks without local cache reliance", async () => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
+    const refreshedAccessToken = buildJwtWithExp(nowSeconds + 600);
     const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      json: async () => ({}),
+      ok: true,
+      json: async () => ({
+        access_token: refreshedAccessToken,
+        refresh_token: "refresh-token-cached",
+      }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -358,7 +401,7 @@ describe("JWT and session callbacks", () => {
       username: "string",
       avatarUrl: "avatar-key",
       accessToken: expiredAccessToken,
-      refreshToken: "refresh-token-fail-terminal",
+      refreshToken: "refresh-token-race",
       accessTokenExpires: (nowSeconds - 60) * 1000,
     };
 
@@ -366,11 +409,98 @@ describe("JWT and session callbacks", () => {
       token: { ...initialToken },
     } as never);
     const secondAttempt = await authOptions.callbacks?.jwt?.({
-      token: { ...(firstAttempt as Record<string, unknown>) },
+      token: {
+        ...(initialToken as Record<string, unknown>),
+        accessToken: buildJwtWithExp(nowSeconds - 90),
+        accessTokenExpires: (nowSeconds - 90) * 1000,
+      },
     } as never);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(firstAttempt).toMatchObject({
+      accessToken: refreshedAccessToken,
+      refreshToken: "refresh-token-cached",
+      error: undefined,
+    });
     expect(secondAttempt).toMatchObject({
+      accessToken: refreshedAccessToken,
+      refreshToken: "refresh-token-cached",
+      error: undefined,
+    });
+  });
+
+  it("invalidates token when refresh token is missing", async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
+
+    const jwt = await authOptions.callbacks?.jwt?.({
+      token: {
+        userId: "user-id",
+        username: "string",
+        avatarUrl: "avatar-key",
+        accessToken: expiredAccessToken,
+        accessTokenExpires: (nowSeconds - 60) * 1000,
+      },
+    } as never);
+
+    expect(jwt).toMatchObject({
+      accessToken: undefined,
+      refreshToken: undefined,
+      error: "SessionExpired",
+    });
+  });
+
+  it("keeps session state on transient refresh failure", async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({ detail: "Too Many Requests" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const jwt = await authOptions.callbacks?.jwt?.({
+      token: {
+        userId: "user-id",
+        username: "string",
+        avatarUrl: "avatar-key",
+        accessToken: expiredAccessToken,
+        refreshToken: "refresh-token-transient",
+        accessTokenExpires: (nowSeconds - 60) * 1000,
+      },
+    } as never);
+
+    expect(jwt).toMatchObject({
+      accessToken: expiredAccessToken,
+      refreshToken: "refresh-token-transient",
+      error: undefined,
+    });
+  });
+
+  it("invalidates session on unexpected refresh failure", async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: "missing-refresh-token",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const jwt = await authOptions.callbacks?.jwt?.({
+      token: {
+        userId: "user-id",
+        username: "string",
+        avatarUrl: "avatar-key",
+        accessToken: expiredAccessToken,
+        refreshToken: "refresh-token-bad-payload",
+        accessTokenExpires: (nowSeconds - 60) * 1000,
+      },
+    } as never);
+
+    expect(jwt).toMatchObject({
       accessToken: undefined,
       refreshToken: undefined,
       error: "RefreshAccessTokenError",
@@ -436,40 +566,8 @@ describe("JWT and session callbacks", () => {
     });
   });
 
-  it("bounds recent refresh cache size to prevent unbounded growth", async () => {
-    const jwtCallback = authOptions.callbacks?.jwt;
-    if (!jwtCallback) {
-      throw new Error("JWT callback is not configured");
-    }
-
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
-    const refreshedAccessToken = buildJwtWithExp(nowSeconds + 600);
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        access_token: refreshedAccessToken,
-        refresh_token: "refresh-token-new",
-      }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const totalRefreshes = 300;
-    for (let index = 0; index < totalRefreshes; index += 1) {
-      await jwtCallback({
-        token: {
-          userId: "user-id",
-          username: "string",
-          avatarUrl: "avatar-key",
-          accessToken: expiredAccessToken,
-          refreshToken: `refresh-token-${index}`,
-          accessTokenExpires: (nowSeconds - 60) * 1000,
-        },
-      } as never);
-    }
-
-    expect(
-      authModule.__internal.getRecentRefreshResultsSizeForTests(),
-    ).toBeLessThanOrEqual(256);
+  it("keeps cache helpers as no-op compatibility hooks", () => {
+    authModule.__internal.clearRecentRefreshResultsForTests();
+    expect(authModule.__internal.getRecentRefreshResultsSizeForTests()).toBe(0);
   });
 });

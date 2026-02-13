@@ -1,5 +1,11 @@
 import { redirect } from "next/navigation";
 
+import {
+  buildRateLimitClientKeyFromIdentifier,
+  buildRateLimitClientSignature,
+  RATE_LIMIT_CLIENT_HEADER,
+  RATE_LIMIT_SIGNATURE_HEADER,
+} from "@/lib/auth/rate-limit-client";
 import { getSessionServer } from "@/lib/auth/session";
 
 import { RegisterForm } from "./_components/register-form";
@@ -39,11 +45,19 @@ export async function registerUser(
   }
 
   try {
+    const rateLimitClientKey = buildRateLimitClientKeyFromIdentifier(email);
+    const rateLimitSignature = buildRateLimitClientSignature(rateLimitClientKey);
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (rateLimitClientKey && rateLimitSignature) {
+      headers[RATE_LIMIT_CLIENT_HEADER] = rateLimitClientKey;
+      headers[RATE_LIMIT_SIGNATURE_HEADER] = rateLimitSignature;
+    }
+
     const response = await fetch(`${API_BASE_URL}/api/v1/auth/register`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({ username, email, password }),
       cache: "no-store",
     });

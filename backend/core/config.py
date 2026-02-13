@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = Field(
         default=60, alias="RATE_LIMIT_WINDOW_SECONDS"
     )
+    rate_limit_proxy_secret: str = Field(default="", alias="RATE_LIMIT_PROXY_SECRET")
     rate_limit_ip_headers: CommaSeparatedList = Field(
         default_factory=lambda: ["x-forwarded-for"],
         alias="RATE_LIMIT_IP_HEADERS",

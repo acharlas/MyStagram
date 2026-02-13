@@ -2,6 +2,13 @@ import type { NextAuthOptions } from "next-auth";
 import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 
+import {
+  buildRateLimitClientKeyFromIdentifier,
+  buildRateLimitClientSignature,
+  RATE_LIMIT_CLIENT_HEADER,
+  RATE_LIMIT_SIGNATURE_HEADER,
+} from "@/lib/auth/rate-limit-client";
+
 type TokenResponse = {
   access_token: string;
   refresh_token: string;
@@ -24,14 +31,7 @@ export type AuthorizedUser = {
 const API_BASE_URL = process.env.BACKEND_API_URL ?? "http://backend:8000";
 const ACCESS_TOKEN_FALLBACK_LIFETIME_MS = 14 * 60 * 1000;
 const ACCESS_TOKEN_REFRESH_SKEW_MS = 5 * 1000;
-const REFRESH_RESULT_GRACE_MS = 30 * 1000;
-const MAX_REFRESH_401_FAILURES = 2;
-const MAX_RECENT_REFRESH_RESULTS = 256;
 const inFlightRefreshes = new Map<string, Promise<TokenResponse>>();
-const recentRefreshResults = new Map<
-  string,
-  { tokens: TokenResponse; expiresAt: number }
->();
 
 function buildApiUrl(path: string) {
   return new URL(path, API_BASE_URL).toString();
@@ -77,52 +77,12 @@ class RefreshAccessTokenError extends Error {
   }
 }
 
-function clearRefreshFailureState(token: Record<string, unknown>): void {
-  token.refresh401FailureCount = undefined;
-  token.lastRefreshFailureAt = undefined;
-}
-
-function pruneExpiredRecentRefreshResults(now = Date.now()): void {
-  for (const [tokenKey, cached] of recentRefreshResults.entries()) {
-    if (cached.expiresAt <= now) {
-      recentRefreshResults.delete(tokenKey);
-    }
+function isTransientRefreshFailure(error: unknown): boolean {
+  if (error instanceof RefreshAccessTokenError) {
+    return error.status === 429 || error.status >= 500;
   }
-}
-
-function enforceRecentRefreshResultLimit(): void {
-  while (recentRefreshResults.size > MAX_RECENT_REFRESH_RESULTS) {
-    const oldestTokenKey = recentRefreshResults.keys().next().value as
-      | string
-      | undefined;
-    if (!oldestTokenKey) {
-      break;
-    }
-    recentRefreshResults.delete(oldestTokenKey);
-  }
-}
-
-function getRecentRefreshResult(refreshToken: string): TokenResponse | null {
-  pruneExpiredRecentRefreshResults();
-
-  const cached = recentRefreshResults.get(refreshToken);
-  if (!cached) {
-    return null;
-  }
-  return cached.tokens;
-}
-
-function storeRecentRefreshResult(
-  refreshToken: string,
-  tokens: TokenResponse,
-): void {
-  pruneExpiredRecentRefreshResults();
-
-  recentRefreshResults.set(refreshToken, {
-    tokens,
-    expiresAt: Date.now() + REFRESH_RESULT_GRACE_MS,
-  });
-  enforceRecentRefreshResultLimit();
+  // Network-level fetch failures should not immediately invalidate session state.
+  return error instanceof TypeError;
 }
 
 async function refreshAccessToken(
@@ -159,20 +119,13 @@ async function refreshAccessToken(
 async function refreshAccessTokenWithConcurrencyGuard(
   refreshToken: string,
 ): Promise<TokenResponse> {
-  const cached = getRecentRefreshResult(refreshToken);
-  if (cached) {
-    return cached;
-  }
-
   const inFlight = inFlightRefreshes.get(refreshToken);
   if (inFlight) {
     return inFlight;
   }
 
   const refreshPromise = (async () => {
-    const refreshed = await refreshAccessToken(refreshToken);
-    storeRecentRefreshResult(refreshToken, refreshed);
-    return refreshed;
+    return refreshAccessToken(refreshToken);
   })().finally(() => {
     inFlightRefreshes.delete(refreshToken);
   });
@@ -182,11 +135,27 @@ async function refreshAccessTokenWithConcurrencyGuard(
 }
 
 export async function loginWithCredentials(username: string, password: string) {
-  const response = await fetch(buildApiUrl("/api/v1/auth/login"), {
+  return loginWithCredentialsWithClientKey(username, password, null);
+}
+
+export async function loginWithCredentialsWithClientKey(
+  username: string,
+  password: string,
+  rateLimitClientKey: string | null,
+) {
+  const loginPath = "/api/v1/auth/login";
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const rateLimitSignature = buildRateLimitClientSignature(rateLimitClientKey);
+  if (rateLimitClientKey && rateLimitSignature) {
+    headers[RATE_LIMIT_CLIENT_HEADER] = rateLimitClientKey;
+    headers[RATE_LIMIT_SIGNATURE_HEADER] = rateLimitSignature;
+  }
+
+  const response = await fetch(buildApiUrl(loginPath), {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify({ username, password }),
     cache: "no-store",
   });
@@ -224,23 +193,28 @@ export type CredentialsInput = {
 };
 
 type AuthorizationDependencies = {
-  login: typeof loginWithCredentials;
+  login: typeof loginWithCredentialsWithClientKey;
   profile: typeof fetchUserProfile;
 };
 
 export async function authorizeWithCredentials(
   credentials: CredentialsInput,
   deps?: Partial<AuthorizationDependencies>,
+  rateLimitClientKey: string | null = null,
 ): Promise<AuthorizedUser | null> {
   if (!credentials?.username || !credentials?.password) {
     return null;
   }
 
-  const { login = loginWithCredentials, profile = fetchUserProfile } =
+  const { login = loginWithCredentialsWithClientKey, profile = fetchUserProfile } =
     deps ?? {};
 
   try {
-    const tokens = await login(credentials.username, credentials.password);
+    const tokens = await login(
+      credentials.username,
+      credentials.password,
+      rateLimitClientKey,
+    );
     const profileData = await profile(tokens.access_token);
 
     return {
@@ -264,7 +238,15 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        return authorizeWithCredentials(credentials ?? {});
+        const identifier =
+          typeof credentials?.username === "string" ? credentials.username : null;
+        const rateLimitClientKey =
+          buildRateLimitClientKeyFromIdentifier(identifier);
+        return authorizeWithCredentials(
+          credentials ?? {},
+          undefined,
+          rateLimitClientKey,
+        );
       },
     }),
   ],
@@ -284,7 +266,6 @@ export const authOptions: NextAuthOptions = {
           authorizedUser.accessToken,
         );
         token.error = undefined;
-        clearRefreshFailureState(token);
         return token;
       }
 
@@ -320,42 +301,19 @@ export const authOptions: NextAuthOptions = {
           refreshedTokens.access_token,
         );
         token.error = undefined;
-        clearRefreshFailureState(token);
       } catch (error) {
-        if (error instanceof RefreshAccessTokenError && error.status === 401) {
-          const cached = getRecentRefreshResult(currentRefreshToken);
-          if (cached) {
-            token.accessToken = cached.access_token;
-            token.refreshToken = cached.refresh_token;
-            token.accessTokenExpires = readAccessTokenExpiry(
-              cached.access_token,
-            );
-            token.error = undefined;
-            clearRefreshFailureState(token);
-            return token;
-          }
-
-          // In multi-instance deployments refresh rotation can race across
-          // nodes. Keep the current token state for one retry window before
-          // treating this as terminal auth failure.
-          const priorFailures =
-            typeof token.refresh401FailureCount === "number"
-              ? token.refresh401FailureCount
-              : 0;
-          const failures = priorFailures + 1;
-          token.refresh401FailureCount = failures;
-          token.lastRefreshFailureAt = Date.now();
-
-          if (failures < MAX_REFRESH_401_FAILURES) {
-            token.error = undefined;
-            return token;
-          }
+        if (isTransientRefreshFailure(error)) {
+          console.warn(
+            "Transient refresh failure; preserving session for retry",
+            error,
+          );
+          token.error = undefined;
+          return token;
         }
         console.error("Unable to refresh access token", error);
         token.accessToken = undefined;
         token.refreshToken = undefined;
         token.accessTokenExpires = undefined;
-        clearRefreshFailureState(token);
         token.error = "RefreshAccessTokenError";
       }
 
@@ -382,11 +340,9 @@ export const authOptions: NextAuthOptions = {
 };
 
 export const __internal = {
-  clearRecentRefreshResultsForTests() {
-    recentRefreshResults.clear();
-  },
+  clearRecentRefreshResultsForTests() {},
   getRecentRefreshResultsSizeForTests() {
-    return recentRefreshResults.size;
+    return 0;
   },
 };
 
