@@ -3,31 +3,13 @@ import Link from "next/link";
 
 import { CommentForm } from "@/components/post/CommentForm";
 import { LikeButton } from "@/components/post/LikeButton";
+import { CommentIcon } from "@/components/ui/icons";
 import { fetchPostComments, fetchPostDetail } from "@/lib/api/posts";
 import { getSessionServer } from "@/lib/auth/session";
 import { buildImageUrl } from "@/lib/image";
 import { sanitizeHtml } from "@/lib/sanitize";
 
 type PostPageProps = { params: Promise<{ postId: string }> };
-
-function CommentIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M21 12a8.25 8.25 0 0 1-11.513 7.6L6.6 20.4l.8-2.887A8.25 8.25 0 1 1 21 12Z"
-      />
-    </svg>
-  );
-}
 
 export default async function PostDetailPage({ params }: PostPageProps) {
   const { postId } = await params;
@@ -54,16 +36,16 @@ export default async function PostDetailPage({ params }: PostPageProps) {
   const safeCaption = post.caption ? sanitizeHtml(post.caption) : "";
 
   return (
-    <section className="mx-auto flex w-full max-w-5xl flex-col gap-6 py-8 md:h-[80vh] md:flex-row md:items-stretch md:gap-0">
-      <article className="rounded-2xl border border-zinc-800 bg-zinc-900 md:flex-1 md:rounded-r-none md:border-r-0">
-        <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-zinc-800 md:h-full md:rounded-r-none md:rounded-l-2xl">
+    <section className="mx-auto flex w-full max-w-6xl flex-col gap-5 py-2 lg:h-[84vh] lg:flex-row lg:gap-4">
+      <article className="overflow-hidden rounded-3xl border border-zinc-800/80 bg-zinc-900/70 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] lg:flex-1">
+        <div className="relative aspect-square w-full bg-zinc-800/80 lg:h-full">
           <Image
             src={imageUrl}
             alt={`Publication ${post.id}`}
             fill
             priority
             className="object-cover"
-            sizes="(max-width: 768px) 100vw, 600px"
+            sizes="(max-width: 1024px) 100vw, 900px"
             unoptimized
           />
         </div>
@@ -71,20 +53,20 @@ export default async function PostDetailPage({ params }: PostPageProps) {
 
       <aside
         id="comments"
-        className="flex max-h-full flex-col rounded-2xl border border-zinc-800 bg-zinc-900 p-4 md:w-96 md:flex-none md:rounded-l-none md:border-l-0"
+        className="flex max-h-full flex-col rounded-3xl border border-zinc-800/80 bg-zinc-900/70 p-4 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] lg:w-[25rem]"
       >
         <header className="mb-4 border-b border-zinc-800 pb-3">
           {authorUsername ? (
             <Link
               href={`/users/${encodeURIComponent(authorUsername)}`}
-              className="text-sm font-semibold text-zinc-100 transition hover:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
+              className="text-sm font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-zinc-900"
             >
               {authorLabel}
             </Link>
           ) : (
             <p className="text-sm font-semibold text-zinc-100">{authorLabel}</p>
           )}
-          <p className="mt-2 text-sm text-zinc-200">
+          <p className="mt-2 text-sm leading-relaxed text-zinc-200">
             {safeCaption || "Aucune légende"}
           </p>
         </header>
@@ -102,11 +84,14 @@ export default async function PostDetailPage({ params }: PostPageProps) {
                 const commentAuthorUsername =
                   comment.author_username ?? undefined;
                 return (
-                  <li key={comment.id} className="text-sm text-zinc-200">
+                  <li
+                    key={comment.id}
+                    className="rounded-xl border border-zinc-800/70 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200"
+                  >
                     {commentAuthorUsername ? (
                       <Link
                         href={`/users/${encodeURIComponent(commentAuthorUsername)}`}
-                        className="font-semibold text-zinc-100 transition hover:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
+                        className="font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-zinc-900"
                       >
                         {commentAuthorLabel}
                       </Link>
@@ -115,7 +100,8 @@ export default async function PostDetailPage({ params }: PostPageProps) {
                         {commentAuthorLabel}
                       </span>
                     )}
-                    : {comment.text}
+                    <span className="text-zinc-400">: </span>
+                    {comment.text}
                   </li>
                 );
               })}
@@ -130,8 +116,9 @@ export default async function PostDetailPage({ params }: PostPageProps) {
               initialLiked={post.viewer_has_liked}
               initialCount={post.like_count}
             />
-            <span className="rounded-full p-2 text-zinc-400">
-              <CommentIcon />
+            <span className="inline-flex items-center gap-2 rounded-full bg-zinc-800/70 px-2.5 py-1.5 text-xs font-medium text-zinc-300">
+              <CommentIcon className="h-4 w-4" />
+              {comments.length}
             </span>
           </div>
           <CommentForm postId={post.id} />

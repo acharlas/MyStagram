@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { LikeButton } from "@/components/post/LikeButton";
+import { CommentIcon } from "@/components/ui/icons";
 import { apiServerFetch } from "@/lib/api/client";
 import { getSessionServer } from "@/lib/auth/session";
 import { buildImageUrl } from "@/lib/image";
@@ -26,25 +27,6 @@ async function getHomeFeed(accessToken?: string): Promise<FeedPost[]> {
   }
 }
 
-function CommentIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M21 12a8.25 8.25 0 0 1-11.513 7.6L6.6 20.4l.8-2.887A8.25 8.25 0 1 1 21 12Z"
-      />
-    </svg>
-  );
-}
-
 function PostCard({ post }: { post: FeedPost }) {
   const safeCaption = post.caption ? sanitizeHtml(post.caption) : "";
   const imageUrl = buildImageUrl(post.image_key);
@@ -60,35 +42,40 @@ function PostCard({ post }: { post: FeedPost }) {
     .toUpperCase();
 
   return (
-    <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-      <header className="flex items-center gap-2">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 text-sm font-semibold text-zinc-200">
+    <article className="group rounded-3xl border border-zinc-800/80 bg-zinc-900/70 p-4 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] backdrop-blur sm:p-5">
+      <header className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 text-sm font-semibold text-zinc-200 ring-1 ring-zinc-700/70">
           {initials || displayName.slice(0, 2).toUpperCase()}
         </div>
-        <div className="text-sm">
+        <div className="min-w-0 text-sm">
           {authorUsername ? (
             <Link
               href={`/users/${encodeURIComponent(authorUsername)}`}
-              className="font-semibold text-zinc-100 transition hover:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
+              className="truncate font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-zinc-900"
             >
               {displayName}
             </Link>
           ) : (
-            <p className="font-semibold text-zinc-100">{displayName}</p>
+            <p className="truncate font-semibold text-zinc-100">
+              {displayName}
+            </p>
           )}
+          {authorUsername ? (
+            <p className="truncate text-xs text-zinc-400">@{authorUsername}</p>
+          ) : null}
         </div>
       </header>
 
       <Link
         href={`/posts/${post.id}`}
-        className="mt-3 block focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
+        className="mt-4 block overflow-hidden rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-zinc-900"
       >
-        <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-zinc-800">
+        <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-zinc-800/80">
           <Image
             src={imageUrl}
             alt={`Publication ${post.id}`}
             fill
-            className="object-cover"
+            className="object-cover transition duration-500 group-hover:scale-[1.02]"
             sizes="(max-width: 768px) 100vw, 600px"
             unoptimized
           />
@@ -96,7 +83,9 @@ function PostCard({ post }: { post: FeedPost }) {
       </Link>
 
       {safeCaption ? (
-        <p className="mt-3 text-sm text-zinc-200">{safeCaption}</p>
+        <p className="mt-3 text-sm leading-relaxed text-zinc-200">
+          {safeCaption}
+        </p>
       ) : (
         <p className="mt-3 text-sm text-zinc-500">Aucune légende</p>
       )}
@@ -109,10 +98,11 @@ function PostCard({ post }: { post: FeedPost }) {
         />
         <Link
           href={`/posts/${post.id}`}
-          className="rounded-full p-2 transition hover:text-zinc-100"
+          className="inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-sm text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100"
           aria-label="Voir les commentaires"
         >
-          <CommentIcon />
+          <CommentIcon className="h-4 w-4" />
+          <span>Commentaires</span>
         </Link>
       </footer>
     </article>
@@ -125,11 +115,24 @@ export default async function ProtectedHomePage() {
   const posts = await getHomeFeed(accessToken);
 
   return (
-    <section className="mx-auto flex w-full max-w-2xl flex-col gap-6 py-8">
+    <section className="mx-auto flex w-full max-w-2xl flex-col gap-5 pb-6 pt-2">
+      <header className="rounded-2xl border border-zinc-800/70 bg-zinc-900/55 px-4 py-3 backdrop-blur">
+        <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Feed</p>
+        <h1 className="mt-1 text-xl font-semibold tracking-tight text-zinc-100">
+          Pour vous
+        </h1>
+      </header>
+
       {posts.length === 0 ? (
-        <p className="text-center text-sm text-zinc-500">
-          Le fil d&apos;actualité est vide pour le moment.
-        </p>
+        <div className="rounded-2xl border border-zinc-800/70 bg-zinc-900/60 p-6 text-center text-sm text-zinc-400">
+          <p>Le fil d&apos;actualité est vide pour le moment.</p>
+          <Link
+            href="/posts/new"
+            className="mt-4 inline-flex rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500"
+          >
+            Publier une photo
+          </Link>
+        </div>
       ) : (
         posts.map((post) => <PostCard key={post.id} post={post} />)
       )}
