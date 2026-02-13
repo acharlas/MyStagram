@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SettingsIcon } from "@/components/ui/icons";
 import { FollowButton } from "@/components/user/FollowButton";
+import { ApiError } from "@/lib/api/client";
 import {
   fetchUserFollowStatus,
   fetchUserPosts,
@@ -44,10 +45,18 @@ export default async function UserProfilePage({
   const viewerUsername = session?.user?.username ?? null;
   const isOwnProfile = viewerUsername === profile.username;
 
-  const isFollowing =
-    !isOwnProfile && accessToken && viewerUsername
-      ? await fetchUserFollowStatus(username, accessToken)
-      : false;
+  let isFollowing = false;
+  if (!isOwnProfile && accessToken && viewerUsername) {
+    try {
+      isFollowing = await fetchUserFollowStatus(username, accessToken);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        notFound();
+      } else {
+        throw error;
+      }
+    }
+  }
 
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-2">

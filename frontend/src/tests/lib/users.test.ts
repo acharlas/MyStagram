@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
+import { ApiError } from "../../lib/api/client";
 import {
   fetchUserFollowers,
   fetchUserFollowStatus,
@@ -8,7 +8,6 @@ import {
   followUserRequest,
   unfollowUserRequest,
 } from "../../lib/api/users";
-import { ApiError } from "../../lib/api/client";
 
 const apiServerFetchMock = vi.hoisted(() => vi.fn());
 
@@ -59,7 +58,9 @@ describe("fetchUserProfile", () => {
   });
 
   it("returns null on backend 404", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new ApiError(404, "User not found"));
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "User not found"),
+    );
 
     const result = await fetchUserProfile("missing");
 
@@ -92,7 +93,9 @@ describe("fetchUserPosts", () => {
   });
 
   it("returns empty array on backend 404", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new ApiError(404, "User not found"));
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "User not found"),
+    );
 
     const result = await fetchUserPosts("demo");
 
@@ -132,12 +135,12 @@ describe("fetchUserFollowers", () => {
     );
   });
 
-  it("returns empty list when backend returns 404", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new ApiError(404, "User not found"));
+  it("throws when backend returns 404", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "User not found"),
+    );
 
-    const result = await fetchUserFollowers("demo");
-
-    expect(result).toEqual([]);
+    await expect(fetchUserFollowers("demo")).rejects.toThrow("User not found");
   });
 
   it("throws when backend call fails with non-404", async () => {
@@ -171,12 +174,14 @@ describe("fetchUserFollowStatus", () => {
     expect(apiServerFetchMock).not.toHaveBeenCalled();
   });
 
-  it("returns false on backend 404", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new ApiError(404, "User not found"));
+  it("throws on backend 404", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "User not found"),
+    );
 
-    const result = await fetchUserFollowStatus("demo", "token-1");
-
-    expect(result).toBe(false);
+    await expect(fetchUserFollowStatus("demo", "token-1")).rejects.toThrow(
+      "User not found",
+    );
   });
 
   it("throws on non-404 backend failure", async () => {

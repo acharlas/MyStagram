@@ -88,45 +88,33 @@ export async function fetchUserFollowers(
   username: string,
   accessToken?: string,
 ): Promise<UserProfilePublic[]> {
-  try {
-    return await apiServerFetch<UserProfilePublic[]>(
-      `${buildProfilePath(username)}/followers`,
-      {
-        cache: "no-store",
-        headers: buildHeaders(accessToken),
-      },
-    );
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 404) {
-      return [];
-    }
-    throw error;
-  }
+  // Contract: this helper propagates backend errors, including 404 for missing users.
+  return apiServerFetch<UserProfilePublic[]>(
+    `${buildProfilePath(username)}/followers`,
+    {
+      cache: "no-store",
+      headers: buildHeaders(accessToken),
+    },
+  );
 }
 
 export async function fetchUserFollowStatus(
   username: string,
   accessToken?: string,
 ): Promise<boolean> {
+  // Contract: missing local auth state means "not following"; backend failures propagate.
   if (!accessToken) {
     return false;
   }
 
-  try {
-    const result = await apiServerFetch<FollowStatusResponse>(
-      `${buildProfilePath(username)}/follow-status`,
-      {
-        cache: "no-store",
-        headers: buildHeaders(accessToken),
-      },
-    );
-    return result.is_following;
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 404) {
-      return false;
-    }
-    throw error;
-  }
+  const result = await apiServerFetch<FollowStatusResponse>(
+    `${buildProfilePath(username)}/follow-status`,
+    {
+      cache: "no-store",
+      headers: buildHeaders(accessToken),
+    },
+  );
+  return result.is_following;
 }
 
 function buildFollowUrl(username: string): string {
