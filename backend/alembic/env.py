@@ -4,21 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 from logging.config import fileConfig
-from pathlib import Path
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.append(str(ROOT_DIR))
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlmodel import SQLModel
 
 from core.config import settings
-from sqlmodel import SQLModel
 
 config = context.config
 
