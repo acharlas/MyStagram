@@ -60,8 +60,7 @@ export async function fetchUserProfile(
     if (error instanceof ApiError && error.status === 404) {
       return null;
     }
-    console.error("Failed to load user profile", error);
-    return null;
+    throw error;
   }
 }
 
@@ -81,8 +80,7 @@ export async function fetchUserPosts(
     if (error instanceof ApiError && error.status === 404) {
       return [];
     }
-    console.error("Failed to load user posts", error);
-    return [];
+    throw error;
   }
 }
 
@@ -99,8 +97,10 @@ export async function fetchUserFollowers(
       },
     );
   } catch (error) {
-    console.error("Failed to load user followers", error);
-    return [];
+    if (error instanceof ApiError && error.status === 404) {
+      return [];
+    }
+    throw error;
   }
 }
 
@@ -125,8 +125,7 @@ export async function fetchUserFollowStatus(
     if (error instanceof ApiError && error.status === 404) {
       return false;
     }
-    console.error("Failed to load follow status", error);
-    return false;
+    throw error;
   }
 }
 

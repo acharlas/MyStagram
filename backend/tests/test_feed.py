@@ -132,6 +132,56 @@ async def test_home_feed_supports_limit_and_offset(
 
 
 @pytest.mark.asyncio
+async def test_feed_home_and_legacy_posts_feed_match(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("viewer")
+    followee_payload = make_user_payload("followee")
+
+    await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    await async_client.post("/api/v1/auth/register", json=followee_payload)
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+
+    viewer_result = await db_session.execute(
+        select(User).where(_eq(User.username, viewer_payload["username"]))
+    )
+    followee_result = await db_session.execute(
+        select(User).where(_eq(User.username, followee_payload["username"]))
+    )
+    viewer = viewer_result.scalar_one()
+    followee = followee_result.scalar_one()
+    db_session.add(Follow(follower_id=viewer.id, followee_id=followee.id))
+
+    now = datetime.now(timezone.utc)
+    for offset in range(7):
+        db_session.add(
+            Post(
+                author_id=followee.id,
+                image_key=f"feed/{offset}.jpg",
+                caption=f"Post {offset}",
+                created_at=now - timedelta(minutes=offset),
+                updated_at=now - timedelta(minutes=offset),
+            )
+        )
+    await db_session.commit()
+
+    params = {"limit": 5, "offset": 1}
+    home_response = await async_client.get("/api/v1/feed/home", params=params)
+    legacy_response = await async_client.get("/api/v1/posts/feed", params=params)
+
+    assert home_response.status_code == 200
+    assert legacy_response.status_code == 200
+    assert home_response.headers.get("x-next-offset") == legacy_response.headers.get(
+        "x-next-offset"
+    )
+    assert home_response.json() == legacy_response.json()
+
+
+@pytest.mark.asyncio
 async def test_home_feed_requires_auth(async_client: AsyncClient):
     response = await async_client.get("/api/v1/feed/home")
     assert response.status_code == 401

@@ -133,6 +133,29 @@ async def test_get_me_returns_private_profile(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_update_me_rejects_too_long_name(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    payload = build_payload()
+    await async_client.post("/api/v1/auth/register", json=payload)
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": payload["username"], "password": payload["password"]},
+    )
+
+    response = await async_client.patch("/api/v1/me", data={"name": "x" * 81})
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert "at most 80 characters" in response.json()["detail"]
+
+    db_result = await db_session.execute(
+        select(User).where(_eq(User.username, payload["username"]))
+    )
+    user = db_result.scalar_one()
+    assert user.name == payload["name"]
+
+
+@pytest.mark.asyncio
 async def test_update_me_rejects_invalid_image(async_client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
     payload = build_payload()
     await async_client.post("/api/v1/auth/register", json=payload)

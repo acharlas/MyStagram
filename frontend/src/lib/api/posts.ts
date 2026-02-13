@@ -45,8 +45,7 @@ export async function fetchPostDetail(
     if (error instanceof ApiError && error.status === 404) {
       return null;
     }
-    console.error("Failed to load post detail", error);
-    return null;
+    throw error;
   }
 }
 
@@ -72,8 +71,7 @@ export async function fetchPostComments(
     if (error instanceof ApiError && error.status === 404) {
       return [];
     }
-    console.error("Failed to load post comments", error);
-    return [];
+    throw error;
   }
 }
 

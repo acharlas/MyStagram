@@ -15,10 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from api.deps import get_current_user, get_db
-from api.v1.posts import collect_like_meta
 from core import settings
 from db.errors import is_unique_violation
 from models import Follow, Post, User
+from .pagination import MAX_PAGE_SIZE, set_next_offset_header
+from .post_views import collect_like_meta
 from services import (
     JPEG_CONTENT_TYPE,
     UploadTooLargeError,
@@ -29,7 +30,7 @@ from services import (
 )
 
 router = APIRouter(tags=["users"])
-MAX_PAGE_SIZE = 100
+MAX_PROFILE_NAME_LENGTH = 80
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -58,17 +59,6 @@ def _upload_avatar_bytes(
         length=len(processed_bytes),
         content_type=processed_content_type or JPEG_CONTENT_TYPE,
     )
-
-
-def _set_next_offset_header(
-    response: Response,
-    *,
-    offset: int,
-    limit: int,
-    has_more: bool,
-) -> None:
-    if has_more:
-        response.headers["X-Next-Offset"] = str(offset + limit)
 
 
 class UserProfilePublic(BaseModel):
@@ -168,10 +158,17 @@ async def update_me(
     updated = False
 
     if name is not None:
-        current_user.name = name or None
+        normalized_name = name.strip()
+        if len(normalized_name) > MAX_PROFILE_NAME_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Name must be at most {MAX_PROFILE_NAME_LENGTH} characters",
+            )
+        current_user.name = normalized_name or None
         updated = True
     if bio is not None:
-        current_user.bio = bio or None
+        normalized_bio = bio.strip()
+        current_user.bio = normalized_bio or None
         updated = True
 
     if avatar is not None:
@@ -266,7 +263,7 @@ async def list_user_posts(
         has_more = len(posts) > limit
         if has_more:
             posts = posts[:limit]
-        _set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+        set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
 
     post_ids = [post.id for post in posts if post.id is not None]
     like_counts, liked_set = await collect_like_meta(session, post_ids, viewer_id)
@@ -423,7 +420,7 @@ async def list_followers(
         has_more = len(followers) > limit
         if has_more:
             followers = followers[:limit]
-        _set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+        set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
 
     return [UserProfilePublic.model_validate(user) for user in followers]
 
@@ -464,6 +461,6 @@ async def list_following(
         has_more = len(following) > limit
         if has_more:
             following = following[:limit]
-        _set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+        set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
 
     return [UserProfilePublic.model_validate(user) for user in following]

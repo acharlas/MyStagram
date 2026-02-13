@@ -14,17 +14,12 @@ async function getHomeFeed(accessToken?: string): Promise<FeedPost[]> {
     return [];
   }
 
-  try {
-    return await apiServerFetch<FeedPost[]>("/api/v1/feed/home", {
-      cache: "no-store",
-      headers: {
-        Cookie: `access_token=${accessToken}`,
-      },
-    });
-  } catch (error) {
-    console.error("Failed to load feed", error);
-    return [];
-  }
+  return apiServerFetch<FeedPost[]>("/api/v1/feed/home", {
+    cache: "no-store",
+    headers: {
+      Cookie: `access_token=${accessToken}`,
+    },
+  });
 }
 
 function PostCard({ post }: { post: FeedPost }) {

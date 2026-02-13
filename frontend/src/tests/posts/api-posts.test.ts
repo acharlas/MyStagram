@@ -60,11 +60,17 @@ describe("fetchPostDetail", () => {
     expect(result?.viewer_has_liked).toBe(true);
   });
 
-  it("returns null when request fails", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new Error("boom"));
+  it("returns null when backend returns 404", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(new ApiError(404, "Post not found"));
 
     const result = await fetchPostDetail("42", "token123");
     expect(result).toBeNull();
+  });
+
+  it("throws on non-404 backend failure", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(new Error("boom"));
+
+    await expect(fetchPostDetail("42", "token123")).rejects.toThrow("boom");
   });
 });
 
@@ -100,11 +106,17 @@ describe("fetchPostComments", () => {
     expect(result).toHaveLength(1);
   });
 
-  it("returns empty array when request fails", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new Error("boom"));
+  it("returns empty array when backend returns 404", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(new ApiError(404, "Post not found"));
 
     const result = await fetchPostComments("42", "token123");
     expect(result).toEqual([]);
+  });
+
+  it("throws on non-404 backend failure", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(new Error("boom"));
+
+    await expect(fetchPostComments("42", "token123")).rejects.toThrow("boom");
   });
 });
 
