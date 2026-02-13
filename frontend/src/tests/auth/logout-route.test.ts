@@ -36,7 +36,10 @@ describe("POST /api/logout", () => {
     apiServerFetchMock.mockResolvedValueOnce({});
 
     const response = await POST(new Request("http://localhost/api/logout"));
-    const payload = (await response.json()) as { success?: boolean };
+    const payload = (await response.json()) as {
+      success?: boolean;
+      revoked?: boolean;
+    };
 
     expect(apiServerFetchMock).toHaveBeenCalledWith(
       "/api/v1/auth/logout",
@@ -48,6 +51,7 @@ describe("POST /api/logout", () => {
       }),
     );
     expect(payload.success).toBe(true);
+    expect(payload.revoked).toBe(true);
   });
 
   it("treats backend 401 as successful local logout", async () => {
@@ -58,9 +62,35 @@ describe("POST /api/logout", () => {
     apiServerFetchMock.mockRejectedValueOnce(new ApiError(401, "Unauthorized"));
 
     const response = await POST(new Request("http://localhost/api/logout"));
-    const payload = (await response.json()) as { success?: boolean };
+    const payload = (await response.json()) as {
+      success?: boolean;
+      revoked?: boolean;
+    };
 
     expect(response.status).toBe(200);
     expect(payload.success).toBe(true);
+    expect(payload.revoked).toBe(false);
+  });
+
+  it("keeps local logout successful when backend revoke fails", async () => {
+    getTokenMock.mockResolvedValueOnce({
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+    });
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(503, "Service unavailable"),
+    );
+
+    const response = await POST(new Request("http://localhost/api/logout"));
+    const payload = (await response.json()) as {
+      success?: boolean;
+      revoked?: boolean;
+      detail?: string | null;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(payload.revoked).toBe(false);
+    expect(payload.detail).toBe("Service unavailable");
   });
 });

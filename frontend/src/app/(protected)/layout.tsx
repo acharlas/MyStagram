@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { redirect } from "next/navigation";
 
 import { NavBar } from "@/components/ui/navbar";
 import { getSessionServer } from "@/lib/auth/session";
@@ -9,6 +10,10 @@ export default async function ProtectedLayout({
   children: ReactNode;
 }) {
   const session = await getSessionServer();
+  if (!session?.accessToken || session.error) {
+    redirect("/login");
+  }
+
   const username = session?.user?.username ?? "";
 
   return (

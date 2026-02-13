@@ -123,10 +123,7 @@ function isTerminalTokenError(token: SessionToken) {
   if (!jwtToken || typeof jwtToken.error !== "string") {
     return false;
   }
-  return (
-    jwtToken.error === "SessionExpired" ||
-    jwtToken.error === "RefreshAccessTokenError"
-  );
+  return jwtToken.error.length > 0;
 }
 
 function buildLoginRedirect(request: NextRequest) {

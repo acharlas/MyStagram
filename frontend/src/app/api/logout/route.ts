@@ -36,21 +36,23 @@ export async function POST(request: Request) {
       cache: "no-store",
       headers: authCookieHeader ? { Cookie: authCookieHeader } : undefined,
     });
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, revoked: true });
   } catch (error) {
     if (error instanceof ApiError) {
       if (error.status === 401) {
-        return NextResponse.json({ success: true });
+        return NextResponse.json({ success: true, revoked: false });
       }
-      return NextResponse.json(
-        { success: false, detail: error.message ?? null },
-        { status: error.status },
-      );
+      return NextResponse.json({
+        success: true,
+        revoked: false,
+        detail: error.message ?? null,
+      });
     }
     console.error("Unexpected error during logout", error);
-    return NextResponse.json(
-      { success: false, detail: "Unexpected error" },
-      { status: 500 },
-    );
+    return NextResponse.json({
+      success: true,
+      revoked: false,
+      detail: "Unexpected error",
+    });
   }
 }

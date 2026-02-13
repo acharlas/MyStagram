@@ -102,8 +102,28 @@ export function NavBar({ username }: NavBarProps) {
         method: "POST",
         credentials: "include",
       });
+
+      let detail: string | null = null;
+      let revoked: boolean | null = null;
+      try {
+        const payload = (await response.json()) as {
+          revoked?: boolean;
+          detail?: string | null;
+        };
+        detail = typeof payload.detail === "string" ? payload.detail : null;
+        revoked = payload.revoked === true;
+      } catch {
+        revoked = null;
+      }
+
       if (!response.ok) {
-        console.error("Logout endpoint responded with", response.status);
+        console.error(
+          "Logout endpoint responded with failure",
+          response.status,
+          detail ?? null,
+        );
+      } else if (revoked === false) {
+        console.warn("Local logout completed, backend token revoke did not complete");
       }
     } catch (error) {
       console.error("Failed to call logout endpoint", error);
