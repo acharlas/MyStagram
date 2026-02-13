@@ -1,5 +1,6 @@
 """Tests for follow/unfollow endpoints."""
 
+import asyncio
 from uuid import uuid4
 
 import pytest
@@ -106,3 +107,34 @@ async def test_followers_and_following_lists(async_client: AsyncClient):
     assert following_resp.status_code == 200
     following = following_resp.json()
     assert {f["username"] for f in following} == {bob["username"], carol["username"]}
+
+
+@pytest.mark.asyncio
+async def test_follow_is_idempotent_under_concurrency(
+    async_client: AsyncClient, db_session: AsyncSession
+):
+    follower_payload = make_user_payload("concurrent_follower")
+    followee_payload = make_user_payload("concurrent_followee")
+
+    await async_client.post("/api/v1/auth/register", json=follower_payload)
+    await async_client.post("/api/v1/auth/register", json=followee_payload)
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": follower_payload["username"],
+            "password": follower_payload["password"],
+        },
+    )
+
+    first, second = await asyncio.gather(
+        async_client.post(f"/api/v1/users/{followee_payload['username']}/follow"),
+        async_client.post(f"/api/v1/users/{followee_payload['username']}/follow"),
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["detail"] in {"Followed", "Already following"}
+    assert second.json()["detail"] in {"Followed", "Already following"}
+
+    result = await db_session.execute(select(Follow))
+    follows = result.scalars().all()
+    assert len(follows) == 1

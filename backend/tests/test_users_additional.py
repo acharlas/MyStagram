@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from api.v1 import users
 from models import Follow, User
@@ -72,6 +73,30 @@ async def test_follow_and_unfollow_direct(db_session):
         session=db_session,
     )
     assert unfollow_result["detail"] == "Unfollowed"
+
+
+@pytest.mark.asyncio
+async def test_follow_user_handles_unique_violation_on_commit(db_session, monkeypatch):
+    follower = _make_user("race_follower")
+    followee = _make_user("race_followee")
+    db_session.add_all([follower, followee])
+    await db_session.commit()
+
+    async def failing_commit() -> None:
+        raise IntegrityError(
+            "INSERT INTO follows",
+            {"follower_id": follower.id, "followee_id": followee.id},
+            Exception("duplicate key value violates unique constraint"),
+        )
+
+    monkeypatch.setattr(db_session, "commit", failing_commit)
+
+    result = await users.follow_user(
+        followee.username,
+        current_user=follower,
+        session=db_session,
+    )
+    assert result["detail"] == "Already following"
 
 
 @pytest.mark.asyncio

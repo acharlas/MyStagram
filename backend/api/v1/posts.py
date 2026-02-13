@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from io import BytesIO
 from typing import Any, cast
@@ -10,11 +11,13 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from api.deps import get_current_user, get_db
 from core import settings
+from db.errors import is_unique_violation
 from models import Comment, Follow, Like, Post, User
 from services import (
     UploadTooLargeError,
@@ -29,6 +32,18 @@ router = APIRouter(prefix="/posts", tags=["posts"])
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], column == value)
+
+
+def _upload_post_image(object_key: str, processed_bytes: bytes, content_type: str) -> None:
+    client = get_minio_client()
+    ensure_bucket(client)
+    client.put_object(
+        settings.minio_bucket,
+        object_key,
+        data=BytesIO(processed_bytes),
+        length=len(processed_bytes),
+        content_type=content_type,
+    )
 
 
 class PostResponse(BaseModel):
@@ -191,14 +206,11 @@ async def create_post(
         )
 
     object_key = f"posts/{current_user.id}/{uuid4().hex}.jpg"
-    client = get_minio_client()
-    ensure_bucket(client)
-    client.put_object(
-        settings.minio_bucket,
+    await asyncio.to_thread(
+        _upload_post_image,
         object_key,
-        data=BytesIO(processed_bytes),
-        length=len(processed_bytes),
-        content_type=content_type,
+        processed_bytes,
+        content_type,
     )
 
     post = Post(
@@ -472,7 +484,12 @@ async def like_post(
     if like_obj is None:
         like = Like(user_id=viewer_id, post_id=post_id)
         session.add(like)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            await session.rollback()
+            if not is_unique_violation(exc):
+                raise
     like_count = await _get_like_count(session, post_id)
     return {"detail": "Liked", "like_count": like_count}
 

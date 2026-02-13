@@ -1,5 +1,6 @@
 """End-to-end tests for authentication endpoints."""
 
+import asyncio
 import hashlib
 from typing import Any, cast
 from uuid import uuid4
@@ -49,6 +50,18 @@ async def test_register_conflict(async_client):
     await async_client.post("/api/v1/auth/register", json=payload)
     response = await async_client.post("/api/v1/auth/register", json=payload)
     assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_register_conflict_under_concurrency(async_client):
+    payload = build_payload()
+
+    first, second = await asyncio.gather(
+        async_client.post("/api/v1/auth/register", json=payload),
+        async_client.post("/api/v1/auth/register", json=payload),
+    )
+    statuses = sorted([first.status_code, second.status_code])
+    assert statuses == [201, 409]
 
 
 @pytest.mark.asyncio

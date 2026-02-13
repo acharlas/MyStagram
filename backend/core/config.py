@@ -1,6 +1,7 @@
 """Application configuration models."""
 
 from functools import lru_cache
+from secrets import token_urlsafe
 from types import MethodType
 from typing import Annotated, Iterable
 
@@ -20,6 +21,15 @@ CommaSeparatedList = Annotated[list[str], BeforeValidator(_split_comma_separated
 COMMA_SEPARATED_FIELDS = frozenset(
     {"rate_limit_ip_headers", "rate_limit_trusted_proxies", "cors_origins"}
 )
+INSECURE_SECRET_KEY_VALUES = frozenset(
+    {
+        "mystagram-demo-secret",
+        "change-me",
+        "changeme",
+        "<random-string>",
+        "secret",
+    }
+)
 
 
 class Settings(BaseSettings):
@@ -36,7 +46,8 @@ class Settings(BaseSettings):
     app_env: str = Field(default="local", alias="APP_ENV")
     debug: bool = Field(default=False, alias="DEBUG")
 
-    secret_key: str = Field(default="mystagram-demo-secret", alias="SECRET_KEY")
+    # Empty by default; local/test may generate an ephemeral key at runtime.
+    secret_key: str = Field(default="", alias="SECRET_KEY")
 
     database_url: str = Field(
         default="postgresql+asyncpg://app:app@postgres:5432/instagram",
@@ -83,6 +94,12 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_lists(cls, values: dict[str, object]) -> dict[str, object]:
         """Allow comma-separated strings for list fields in env files."""
+        # Backward compatibility for older env files that still use JWT_SECRET.
+        has_secret = any(values.get(key) for key in ("secret_key", "SECRET_KEY"))
+        legacy_secret = values.get("JWT_SECRET") or values.get("jwt_secret")
+        if not has_secret and isinstance(legacy_secret, str) and legacy_secret.strip():
+            values["SECRET_KEY"] = legacy_secret.strip()
+
         for field_name in (
             "rate_limit_ip_headers",
             "rate_limit_trusted_proxies",
@@ -103,9 +120,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _ensure_secret_key(self) -> "Settings":
-        """Prevent insecure defaults outside of local/test environments."""
-        if not self.secret_key and self.app_env not in {"local", "test"}:
+        """Validate secret key policy across environments."""
+        app_env = self.app_env.strip().lower()
+        secret = self.secret_key.strip()
+
+        if not secret:
+            if app_env in {"local", "test"}:
+                self.secret_key = token_urlsafe(48)
+                return self
             raise ValueError("SECRET_KEY must be configured for non-local environments")
+
+        if app_env not in {"local", "test"} and secret in INSECURE_SECRET_KEY_VALUES:
+            raise ValueError("SECRET_KEY uses an insecure placeholder value")
         return self
 
     @classmethod

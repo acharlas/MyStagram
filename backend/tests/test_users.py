@@ -334,12 +334,7 @@ async def test_list_user_posts_requires_follow(
     )
 
     response = await async_client.get(f"/api/v1/users/{author_payload['username']}/posts")
-    assert response.status_code == status.HTTP_200_OK
-    items = response.json()
-    assert len(items) == 1
-    assert items[0]["id"] == post.id
-    assert items[0]["like_count"] == 0
-    assert items[0]["viewer_has_liked"] is False
+    assert response.status_code == status.HTTP_404_NOT_FOUND
 
     await async_client.post("/api/v1/auth/logout")
 

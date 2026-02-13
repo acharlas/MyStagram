@@ -8,6 +8,10 @@ import sys
 from logging.config import fileConfig
 from pathlib import Path
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -15,10 +19,6 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from core.config import settings
 from sqlmodel import SQLModel
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.append(str(ROOT_DIR))
 
 config = context.config
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from io import BytesIO
 from typing import Any, cast
 from uuid import uuid4
@@ -9,12 +10,14 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy import and_, case, delete, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from api.deps import get_current_user, get_db
 from api.v1.posts import collect_like_meta
 from core import settings
+from db.errors import is_unique_violation
 from models import Follow, Post, User
 from services import (
     JPEG_CONTENT_TYPE,
@@ -38,6 +41,22 @@ def _ilike(column: Any, pattern: str) -> ColumnElement[bool]:
 
 def _is_not_null(column: Any) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], column.isnot(None))
+
+
+def _upload_avatar_bytes(
+    object_key: str,
+    processed_bytes: bytes,
+    processed_content_type: str,
+) -> None:
+    client = get_minio_client()
+    ensure_bucket(client)
+    client.put_object(
+        settings.minio_bucket,
+        object_key,
+        data=BytesIO(processed_bytes),
+        length=len(processed_bytes),
+        content_type=processed_content_type or JPEG_CONTENT_TYPE,
+    )
 
 
 class UserProfilePublic(BaseModel):
@@ -155,15 +174,11 @@ async def update_me(
             ) from exc
 
         object_key = f"avatars/{uuid4().hex}.jpg"
-
-        client = get_minio_client()
-        ensure_bucket(client)
-        client.put_object(
-            settings.minio_bucket,
+        await asyncio.to_thread(
+            _upload_avatar_bytes,
             object_key,
-            data=BytesIO(processed_bytes),
-            length=len(processed_bytes),
-            content_type=processed_content_type or JPEG_CONTENT_TYPE,
+            processed_bytes,
+            processed_content_type,
         )
 
         current_user.avatar_key = object_key
@@ -201,6 +216,17 @@ async def list_user_posts(
         )
 
     viewer_id = current_user.id
+    if viewer_id != author.id:
+        follow_result = await session.execute(
+            select(Follow)
+            .where(
+                _eq(Follow.follower_id, viewer_id),
+                _eq(Follow.followee_id, author.id),
+            )
+            .limit(1)
+        )
+        if follow_result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     posts_result = await session.execute(
         select(Post)
@@ -259,7 +285,13 @@ async def follow_user(
 
     follow = Follow(follower_id=current_user.id, followee_id=followee.id)
     session.add(follow)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        if is_unique_violation(exc):
+            return {"detail": "Already following"}
+        raise
     return {"detail": "Followed"}
 
 

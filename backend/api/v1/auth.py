@@ -9,6 +9,7 @@ from typing import Any, Literal, cast
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
@@ -22,6 +23,7 @@ from core import (
     settings,
     verify_password,
 )
+from db.errors import is_unique_violation
 from models import RefreshToken, User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -215,8 +217,16 @@ async def register(
         bio=payload.bio,
     )
     session.add(user)
-    await session.commit()
-    await session.refresh(user)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        if is_unique_violation(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User with that username or email already exists",
+            ) from exc
+        raise
     return UserResponse.model_validate(user)
 
 
