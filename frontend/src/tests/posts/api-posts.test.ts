@@ -10,7 +10,7 @@ vi.mock("../../lib/api/client", async () => {
   };
 });
 
-import { apiServerFetch } from "../../lib/api/client";
+import { ApiError, apiServerFetch } from "../../lib/api/client";
 import {
   createPostComment,
   fetchPostComments,
@@ -127,10 +127,22 @@ describe("likePostRequest", () => {
     );
   });
 
-  it("returns null on failure", async () => {
+  it("throws ApiError on unexpected failure", async () => {
     apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
-    const result = await likePostRequest("42", "token123");
-    expect(result).toBeNull();
+    await expect(likePostRequest("42", "token123")).rejects.toMatchObject({
+      status: 500,
+      name: "ApiError",
+    });
+  });
+
+  it("preserves backend error status", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+    await expect(likePostRequest("42", "token123")).rejects.toMatchObject({
+      status: 404,
+      message: "Post not found",
+    });
   });
 });
 
@@ -153,10 +165,12 @@ describe("unlikePostRequest", () => {
     );
   });
 
-  it("returns null on failure", async () => {
+  it("throws ApiError on unexpected failure", async () => {
     apiServerFetchMock.mockRejectedValueOnce(new Error("bad"));
-    const result = await unlikePostRequest("42", "token123");
-    expect(result).toBeNull();
+    await expect(unlikePostRequest("42", "token123")).rejects.toMatchObject({
+      status: 500,
+      name: "ApiError",
+    });
   });
 });
 
@@ -188,9 +202,13 @@ describe("createPostComment", () => {
     );
   });
 
-  it("returns null on failure", async () => {
+  it("throws ApiError on unexpected failure", async () => {
     apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
-    const result = await createPostComment("42", "Hello", "token123");
-    expect(result).toBeNull();
+    await expect(
+      createPostComment("42", "Hello", "token123"),
+    ).rejects.toMatchObject({
+      status: 500,
+      name: "ApiError",
+    });
   });
 });

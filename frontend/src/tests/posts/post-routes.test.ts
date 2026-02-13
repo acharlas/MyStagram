@@ -1,0 +1,89 @@
+import { describe, expect, it, vi } from "vitest";
+
+const getSessionServerMock = vi.hoisted(() => vi.fn());
+const likePostRequestMock = vi.hoisted(() => vi.fn());
+const unlikePostRequestMock = vi.hoisted(() => vi.fn());
+const createPostCommentMock = vi.hoisted(() => vi.fn());
+const ApiErrorMock = vi.hoisted(
+  () =>
+    class ApiError extends Error {
+      readonly status: number;
+
+      constructor(status: number, message?: string) {
+        super(message ?? `API request failed with status ${status}`);
+        this.name = "ApiError";
+        this.status = status;
+      }
+    },
+);
+
+vi.mock("@/lib/auth/session", () => ({
+  getSessionServer: getSessionServerMock,
+}));
+
+vi.mock("@/lib/api/posts", () => ({
+  likePostRequest: likePostRequestMock,
+  unlikePostRequest: unlikePostRequestMock,
+  createPostComment: createPostCommentMock,
+}));
+
+vi.mock("@/lib/api/client", () => ({
+  ApiError: ApiErrorMock,
+}));
+
+import { ApiError } from "@/lib/api/client";
+import {
+  DELETE as unlikePostRoute,
+  POST as likePostRoute,
+} from "../../app/api/posts/[postId]/likes/route";
+import { POST as commentPostRoute } from "../../app/api/posts/[postId]/comments/route";
+
+describe("post route handlers", () => {
+  it("propagates backend error status for like endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    likePostRequestMock.mockRejectedValueOnce(new ApiError(404, "Post not found"));
+
+    const response = await likePostRoute(new Request("http://localhost"), {
+      params: { postId: "42" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.detail).toBe("Post not found");
+  });
+
+  it("propagates backend error status for unlike endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    unlikePostRequestMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+
+    const response = await unlikePostRoute(new Request("http://localhost"), {
+      params: { postId: "42" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.detail).toBe("Post not found");
+  });
+
+  it("propagates backend error status for comment creation endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    createPostCommentMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+
+    const response = await commentPostRoute(
+      new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "hello" }),
+      }),
+      { params: { postId: "42" } },
+    );
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.detail).toBe("Post not found");
+  });
+});
