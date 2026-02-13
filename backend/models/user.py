@@ -21,6 +21,11 @@ class User(SQLModel, table=True):
     email: str = Field(
         sa_column=Column(String(255), unique=True, nullable=False, index=True)
     )
+    # Stores a normalized legacy login identifier when email had to be
+    # rewritten during case-insensitive deduplication migration.
+    email_login_alias: str | None = Field(
+        default=None, sa_column=Column(String(255), nullable=True, unique=True)
+    )
     password_hash: str = Field(
         sa_column=Column(String(255), nullable=False)
     )

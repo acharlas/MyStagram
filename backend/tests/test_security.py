@@ -50,11 +50,21 @@ def test_settings_reject_insecure_secret_in_production():
         Settings(APP_ENV="production", SECRET_KEY="mystagram-demo-secret")
 
 
-def test_settings_require_secret_in_production():
+def test_settings_require_secret_in_production(monkeypatch):
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+
     with pytest.raises(ValueError):
-        Settings(APP_ENV="production")
+        Settings(APP_ENV="production", _env_file=None)
 
 
-def test_settings_accept_legacy_jwt_secret_alias():
-    settings = Settings(APP_ENV="local", JWT_SECRET="legacy-secret-value")
+def test_settings_accept_legacy_jwt_secret_alias(monkeypatch):
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+
+    settings = Settings(
+        APP_ENV="local",
+        JWT_SECRET="legacy-secret-value",
+        _env_file=None,
+    )
     assert settings.secret_key == "legacy-secret-value"
