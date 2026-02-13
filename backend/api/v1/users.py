@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from io import BytesIO
-from typing import Any, cast
+from typing import Annotated, Any, cast
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy import and_, case, delete, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -29,6 +29,7 @@ from services import (
 )
 
 router = APIRouter(tags=["users"])
+MAX_PAGE_SIZE = 100
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -59,6 +60,17 @@ def _upload_avatar_bytes(
     )
 
 
+def _set_next_offset_header(
+    response: Response,
+    *,
+    offset: int,
+    limit: int,
+    has_more: bool,
+) -> None:
+    if has_more:
+        response.headers["X-Next-Offset"] = str(offset + limit)
+
+
 class UserProfilePublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -79,6 +91,10 @@ class UserPostSummary(BaseModel):
     caption: str | None = None
     like_count: int = 0
     viewer_has_liked: bool = False
+
+
+class FollowStatusResponse(BaseModel):
+    is_following: bool
 
 
 @router.get("/users/search", response_model=list[UserProfilePublic])
@@ -195,6 +211,9 @@ async def update_me(
 @router.get("/users/{username}/posts", response_model=list[UserPostSummary])
 async def list_user_posts(
     username: str,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> list[UserPostSummary]:
@@ -228,12 +247,26 @@ async def list_user_posts(
         if follow_result.scalar_one_or_none() is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    posts_result = await session.execute(
+    posts_query = (
         select(Post)
         .where(_eq(Post.author_id, author.id))
-        .order_by(Post.created_at.desc())  # type: ignore[attr-defined]
+        .order_by(
+            Post.created_at.desc(),  # type: ignore[attr-defined]
+            Post.id.desc(),  # type: ignore[attr-defined]
+        )
     )
+    if offset > 0:
+        posts_query = posts_query.offset(offset)
+    if limit is not None:
+        posts_query = posts_query.limit(limit + 1)
+
+    posts_result = await session.execute(posts_query)
     posts = posts_result.scalars().all()
+    if limit is not None:
+        has_more = len(posts) > limit
+        if has_more:
+            posts = posts[:limit]
+        _set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
 
     post_ids = [post.id for post in posts if post.id is not None]
     like_counts, liked_set = await collect_like_meta(session, post_ids, viewer_id)
@@ -322,9 +355,44 @@ async def unfollow_user(
     return {"detail": "Unfollowed"}
 
 
+@router.get("/users/{username}/follow-status", response_model=FollowStatusResponse)
+async def get_follow_status(
+    username: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> FollowStatusResponse:
+    result = await session.execute(select(User).where(_eq(User.username, username)))
+    target_user = result.scalar_one_or_none()
+    if target_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if current_user.id is None or target_user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User record missing identifier",
+        )
+
+    is_following = False
+    if current_user.id != target_user.id:
+        follow_result = await session.execute(
+            select(Follow)
+            .where(
+                _eq(Follow.follower_id, current_user.id),
+                _eq(Follow.followee_id, target_user.id),
+            )
+            .limit(1)
+        )
+        is_following = follow_result.scalar_one_or_none() is not None
+
+    return FollowStatusResponse(is_following=is_following)
+
+
 @router.get("/users/{username}/followers", response_model=list[UserProfilePublic])
 async def list_followers(
     username: str,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
 ) -> list[UserProfilePublic]:
     result = await session.execute(select(User).where(_eq(User.username, username)))
@@ -342,16 +410,30 @@ async def list_followers(
         select(User)
         .join(Follow, _eq(Follow.follower_id, User.id))
         .where(_eq(Follow.followee_id, target_user.id))
-        .order_by(User.username)
+        .order_by(User.username, User.id)
     )
+    if offset > 0:
+        followers_query = followers_query.offset(offset)
+    if limit is not None:
+        followers_query = followers_query.limit(limit + 1)
+
     followers_result = await session.execute(followers_query)
     followers = followers_result.scalars().all()
+    if limit is not None:
+        has_more = len(followers) > limit
+        if has_more:
+            followers = followers[:limit]
+        _set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
     return [UserProfilePublic.model_validate(user) for user in followers]
 
 
 @router.get("/users/{username}/following", response_model=list[UserProfilePublic])
 async def list_following(
     username: str,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
 ) -> list[UserProfilePublic]:
     result = await session.execute(select(User).where(_eq(User.username, username)))
@@ -369,8 +451,19 @@ async def list_following(
         select(User)
         .join(Follow, _eq(Follow.followee_id, User.id))
         .where(_eq(Follow.follower_id, target_user.id))
-        .order_by(User.username)
+        .order_by(User.username, User.id)
     )
+    if offset > 0:
+        following_query = following_query.offset(offset)
+    if limit is not None:
+        following_query = following_query.limit(limit + 1)
+
     following_result = await session.execute(following_query)
     following = following_result.scalars().all()
+    if limit is not None:
+        has_more = len(following) > limit
+        if has_more:
+            following = following[:limit]
+        _set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
     return [UserProfilePublic.model_validate(user) for user in following]

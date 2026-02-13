@@ -99,14 +99,106 @@ async def test_followers_and_following_lists(async_client: AsyncClient):
     # Check Alice followers (should include Bob only)
     followers_resp = await async_client.get(f"/api/v1/users/{alice['username']}/followers")
     assert followers_resp.status_code == 200
+    assert followers_resp.headers.get("x-next-offset") is None
     followers = followers_resp.json()
     assert {f["username"] for f in followers} == {bob["username"]}
+    followers_paged = await async_client.get(
+        f"/api/v1/users/{alice['username']}/followers",
+        params={"limit": 1, "offset": 0},
+    )
+    assert followers_paged.status_code == 200
+    assert followers_paged.headers.get("x-next-offset") is None
 
     # Check Alice following (should include Bob & Carol)
     following_resp = await async_client.get(f"/api/v1/users/{alice['username']}/following")
     assert following_resp.status_code == 200
+    assert following_resp.headers.get("x-next-offset") is None
     following = following_resp.json()
     assert {f["username"] for f in following} == {bob["username"], carol["username"]}
+    following_paged = await async_client.get(
+        f"/api/v1/users/{alice['username']}/following",
+        params={"limit": 1, "offset": 0},
+    )
+    assert following_paged.status_code == 200
+    assert following_paged.headers.get("x-next-offset") == "1"
+
+
+@pytest.mark.asyncio
+async def test_followers_and_following_allow_public_access(async_client: AsyncClient):
+    alice = make_user_payload("alice")
+    bob = make_user_payload("bob")
+
+    await async_client.post("/api/v1/auth/register", json=alice)
+    await async_client.post("/api/v1/auth/register", json=bob)
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": bob["username"], "password": bob["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{alice['username']}/follow")
+    await async_client.post("/api/v1/auth/logout")
+
+    followers_resp = await async_client.get(f"/api/v1/users/{alice['username']}/followers")
+    assert followers_resp.status_code == 200
+
+    following_resp = await async_client.get(f"/api/v1/users/{alice['username']}/following")
+    assert following_resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_followers_list_visible_to_non_followers(async_client: AsyncClient):
+    alice = make_user_payload("alice")
+    bob = make_user_payload("bob")
+    eve = make_user_payload("eve")
+
+    for user in (alice, bob, eve):
+        await async_client.post("/api/v1/auth/register", json=user)
+
+    # Bob follows Alice.
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": bob["username"], "password": bob["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{alice['username']}/follow")
+    await async_client.post("/api/v1/auth/logout")
+
+    # Eve does not follow Alice and can still list Alice's graph.
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": eve["username"], "password": eve["password"]},
+    )
+    await async_client.post("/api/v1/auth/logout")
+
+    followers_resp = await async_client.get(f"/api/v1/users/{alice['username']}/followers")
+    assert followers_resp.status_code == 200
+    assert {f["username"] for f in followers_resp.json()} == {bob["username"]}
+
+    following_resp = await async_client.get(f"/api/v1/users/{alice['username']}/following")
+    assert following_resp.status_code == 200
+    assert following_resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_follow_status_returns_boolean(async_client: AsyncClient):
+    alice = make_user_payload("alice")
+    bob = make_user_payload("bob")
+
+    for user in (alice, bob):
+        await async_client.post("/api/v1/auth/register", json=user)
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": bob["username"], "password": bob["password"]},
+    )
+
+    initial = await async_client.get(f"/api/v1/users/{alice['username']}/follow-status")
+    assert initial.status_code == 200
+    assert initial.json()["is_following"] is False
+
+    await async_client.post(f"/api/v1/users/{alice['username']}/follow")
+    after_follow = await async_client.get(f"/api/v1/users/{alice['username']}/follow-status")
+    assert after_follow.status_code == 200
+    assert after_follow.json()["is_following"] is True
 
 
 @pytest.mark.asyncio

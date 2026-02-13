@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from io import BytesIO
-from typing import Any, cast
+from typing import Annotated, Any, cast
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -28,10 +28,22 @@ from services import (
 )
 
 router = APIRouter(prefix="/posts", tags=["posts"])
+MAX_PAGE_SIZE = 100
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], column == value)
+
+
+def _set_next_offset_header(
+    response: Response,
+    *,
+    offset: int,
+    limit: int,
+    has_more: bool,
+) -> None:
+    if has_more:
+        response.headers["X-Next-Offset"] = str(offset + limit)
 
 
 def _upload_post_image(object_key: str, processed_bytes: bytes, content_type: str) -> None:
@@ -232,6 +244,9 @@ async def create_post(
 
 @router.get("", response_model=list[PostResponse])
 async def list_posts(
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[PostResponse]:
@@ -242,12 +257,27 @@ async def list_posts(
             detail="User record missing identifier",
         )
 
-    result = await session.execute(
+    query = (
         select(Post)
         .where(_eq(Post.author_id, viewer_id))
-        .order_by(Post.created_at.desc())  # type: ignore[attr-defined]
+        .order_by(
+            Post.created_at.desc(),  # type: ignore[attr-defined]
+            Post.id.desc(),  # type: ignore[attr-defined]
+        )
     )
+    if offset > 0:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit + 1)
+
+    result = await session.execute(query)
     posts = result.scalars().all()
+    if limit is not None:
+        has_more = len(posts) > limit
+        if has_more:
+            posts = posts[:limit]
+        _set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
     post_ids = [post.id for post in posts if post.id is not None]
     count_map, liked_set = await collect_like_meta(session, post_ids, viewer_id)
     return [
@@ -264,6 +294,9 @@ async def list_posts(
 
 @router.get("/feed", response_model=list[PostResponse])
 async def get_feed(
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[PostResponse]:
@@ -276,14 +309,29 @@ async def get_feed(
     post_entity = cast(Any, Post)
     author_name_column = cast(ColumnElement[str | None], User.name)
     author_username_column = cast(ColumnElement[str | None], User.username)
-    result = await session.execute(
+    query = (
         select(post_entity, author_name_column, author_username_column)
         .join(User, _eq(User.id, Post.author_id))
         .join(Follow, _eq(Follow.followee_id, Post.author_id))
         .where(_eq(Follow.follower_id, current_user.id))
-        .order_by(Post.created_at.desc())  # type: ignore[attr-defined]
+        .order_by(
+            Post.created_at.desc(),  # type: ignore[attr-defined]
+            Post.id.desc(),  # type: ignore[attr-defined]
+        )
     )
+    if offset > 0:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit + 1)
+
+    result = await session.execute(query)
     rows = result.all()
+    if limit is not None:
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]
+        _set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
     post_ids = [post.id for post, _name, _username in rows if post.id is not None]
     count_map, liked_set = await collect_like_meta(session, post_ids, current_user.id)
     return [
@@ -348,6 +396,9 @@ async def get_post(
 @router.get("/{post_id}/comments", response_model=list[CommentResponse])
 async def get_post_comments(
     post_id: int,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[CommentResponse]:
@@ -374,13 +425,28 @@ async def get_post_comments(
     comment_entity = cast(Any, Comment)
     author_name_column = cast(ColumnElement[str | None], User.name)
     author_username_column = cast(ColumnElement[str | None], User.username)
-    result = await session.execute(
+    query = (
         select(comment_entity, author_name_column, author_username_column)
         .join(User, _eq(User.id, Comment.author_id))
         .where(_eq(Comment.post_id, post_id))
-        .order_by(Comment.created_at.asc())  # type: ignore[attr-defined]
+        .order_by(
+            Comment.created_at.asc(),  # type: ignore[attr-defined]
+            Comment.id.asc(),  # type: ignore[attr-defined]
+        )
     )
+    if offset > 0:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit + 1)
+
+    result = await session.execute(query)
     rows = result.all()
+    if limit is not None:
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]
+        _set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
     return [
         CommentResponse.from_comment(
             comment,

@@ -98,6 +98,7 @@ async def test_create_and_get_post(
 
     list_response = await async_client.get("/api/v1/posts")
     assert list_response.status_code == 200
+    assert list_response.headers.get("x-next-offset") is None
     listed = list_response.json()
     assert len(listed) == 1
     assert listed[0]["like_count"] == 0
@@ -212,8 +213,18 @@ async def test_get_post_comments_requires_access(
 
     response = await async_client.get(f"/api/v1/posts/{post.id}/comments")
     assert response.status_code == 200
+    assert response.headers.get("x-next-offset") is None
     payload = response.json()
     assert [item["text"] for item in payload] == ["First!", "Thanks!"]
+
+    paginated = await async_client.get(
+        f"/api/v1/posts/{post.id}/comments",
+        params={"limit": 1, "offset": 1},
+    )
+    assert paginated.status_code == 200
+    assert paginated.headers.get("x-next-offset") is None
+    paginated_payload = paginated.json()
+    assert [item["text"] for item in paginated_payload] == ["Thanks!"]
 
     await async_client.post("/api/v1/auth/logout")
     author_login = await async_client.post(
@@ -474,6 +485,7 @@ async def test_feed_returns_followee_posts(
 
     response = await async_client.get("/api/v1/posts/feed")
     assert response.status_code == 200
+    assert response.headers.get("x-next-offset") is None
     feed = response.json()
 
     assert [item["caption"] for item in feed] == ["Followee2 newest", "Followee1 older"]

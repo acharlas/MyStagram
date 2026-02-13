@@ -294,6 +294,7 @@ async def test_list_user_posts_visible_to_owner(
 
     response = await async_client.get(f"/api/v1/users/{owner['username']}/posts")
     assert response.status_code == 200
+    assert response.headers.get("x-next-offset") is None
     body = response.json()
     assert len(body) == 1
     assert body[0]["id"] == post.id
@@ -352,8 +353,63 @@ async def test_list_user_posts_requires_follow(
         f"/api/v1/users/{author_payload['username']}/posts"
     )
     assert allowed_response.status_code == 200
+    assert allowed_response.headers.get("x-next-offset") is None
     items = allowed_response.json()
     assert len(items) == 1
     assert items[0]["id"] == post.id
     assert items[0]["like_count"] == 1
     assert items[0]["viewer_has_liked"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_user_posts_supports_limit_and_offset(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    author_payload = make_payload_for("author_paginated")
+    viewer_payload = make_payload_for("viewer_paginated")
+    await async_client.post("/api/v1/auth/register", json=author_payload)
+    await async_client.post("/api/v1/auth/register", json=viewer_payload)
+
+    author = (
+        await db_session.execute(
+            select(User).where(_eq(User.username, author_payload["username"]))
+        )
+    ).scalar_one()
+    viewer = (
+        await db_session.execute(
+            select(User).where(_eq(User.username, viewer_payload["username"]))
+        )
+    ).scalar_one()
+    db_session.add(Follow(follower_id=viewer.id, followee_id=author.id))
+
+    for idx in range(8):
+        db_session.add(
+            Post(
+                author_id=author.id,
+                image_key=f"posts/paginated-{idx}.jpg",
+                caption=f"Post {idx}",
+            )
+        )
+    await db_session.commit()
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+
+    first_page = await async_client.get(
+        f"/api/v1/users/{author_payload['username']}/posts",
+        params={"limit": 3, "offset": 0},
+    )
+    assert first_page.status_code == 200
+    assert len(first_page.json()) == 3
+    assert first_page.headers.get("x-next-offset") == "3"
+
+    second_page = await async_client.get(
+        f"/api/v1/users/{author_payload['username']}/posts",
+        params={"limit": 3, "offset": 3},
+    )
+    assert second_page.status_code == 200
+    assert len(second_page.json()) == 3
+    assert second_page.headers.get("x-next-offset") == "6"

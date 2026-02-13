@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import Response
 from sqlalchemy.exc import IntegrityError
 
 from api.v1 import users
@@ -111,8 +112,16 @@ async def test_list_followers_and_following(db_session):
     db_session.add(Follow(follower_id=alice.id, followee_id=charlie.id))
     await db_session.commit()
 
-    followers = await users.list_followers(alice.username, session=db_session)
+    followers = await users.list_followers(
+        alice.username,
+        response=Response(),
+        session=db_session,
+    )
     assert [item.username for item in followers] == ["bob"]
 
-    following = await users.list_following(alice.username, session=db_session)
+    following = await users.list_following(
+        alice.username,
+        response=Response(),
+        session=db_session,
+    )
     assert [item.username for item in following] == ["charlie"]
