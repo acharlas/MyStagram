@@ -51,10 +51,10 @@ export default async function UserProfilePage({
 
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-2">
-      <header className="rounded-3xl border border-zinc-800/70 bg-zinc-900/60 p-5 backdrop-blur sm:p-6">
+      <header className="ui-surface-card rounded-3xl border ui-border p-5 backdrop-blur sm:p-6">
         <div className="flex flex-col gap-6 text-center sm:flex-row sm:items-start sm:justify-between sm:text-left">
           <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:gap-6">
-            <Avatar className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border border-zinc-700/80 bg-zinc-900 ring-2 ring-zinc-800/70">
+            <Avatar className="ui-surface-input flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border ui-border ring-2 ring-[color:var(--ui-border)]">
               {avatarUrl ? (
                 <AvatarImage
                   src={avatarUrl}
@@ -65,7 +65,7 @@ export default async function UserProfilePage({
                   unoptimized
                 />
               ) : (
-                <AvatarFallback className="flex h-full w-full items-center justify-center bg-zinc-900 text-2xl font-semibold text-zinc-100">
+                <AvatarFallback className="ui-surface-input flex h-full w-full items-center justify-center text-2xl font-semibold text-zinc-100">
                   {initials}
                 </AvatarFallback>
               )}
@@ -75,12 +75,12 @@ export default async function UserProfilePage({
                 @{profile.username}
               </h1>
               {profile.name ? (
-                <p className="text-sm font-medium text-zinc-300">
+                <p className="ui-text-muted text-sm font-medium">
                   {profile.name}
                 </p>
               ) : null}
               {safeBio ? (
-                <p className="max-w-xl text-sm leading-relaxed text-zinc-400">
+                <p className="ui-text-muted max-w-xl text-sm leading-relaxed">
                   {safeBio}
                 </p>
               ) : null}
@@ -99,7 +99,7 @@ export default async function UserProfilePage({
           {isOwnProfile ? (
             <Link
               href="/settings"
-              className="inline-flex h-10 w-10 items-center justify-center self-center rounded-full border border-zinc-700 bg-zinc-900 text-zinc-200 transition hover:border-sky-500/60 hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-zinc-900 sm:self-start"
+              className="ui-surface-input inline-flex h-10 w-10 items-center justify-center self-center rounded-full border ui-border text-zinc-200 transition hover:border-sky-500/60 hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)] sm:self-start"
               aria-label="Ouvrir les paramètres du profil"
               title="Paramètres"
             >
@@ -114,7 +114,7 @@ export default async function UserProfilePage({
         className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4"
       >
         {posts.length === 0 ? (
-          <p className="col-span-full rounded-2xl border border-zinc-800/70 bg-zinc-900/60 p-5 text-center text-sm text-zinc-500 sm:text-left">
+          <p className="ui-surface-card ui-text-subtle col-span-full rounded-2xl border ui-border p-5 text-center text-sm sm:text-left">
             Aucune publication pour le moment.
           </p>
         ) : (
@@ -124,7 +124,7 @@ export default async function UserProfilePage({
               <Link
                 key={post.id}
                 href={`/posts/${post.id}`}
-                className="group relative block aspect-square overflow-hidden rounded-2xl border border-zinc-800/70 bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-zinc-900"
+                className="ui-surface-input group relative block aspect-square overflow-hidden rounded-2xl border ui-border focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
               >
                 <Image
                   src={imageUrl}

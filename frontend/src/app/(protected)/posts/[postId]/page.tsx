@@ -23,7 +23,7 @@ export default async function PostDetailPage({ params }: PostPageProps) {
 
   if (!post) {
     return (
-      <section className="mx-auto flex w-full max-w-xl flex-col gap-4 py-8 text-center text-sm text-zinc-500">
+      <section className="ui-text-subtle mx-auto flex w-full max-w-xl flex-col gap-4 py-8 text-center text-sm">
         <p>Ce contenu est introuvable.</p>
       </section>
     );
@@ -37,8 +37,8 @@ export default async function PostDetailPage({ params }: PostPageProps) {
 
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-5 py-2 lg:h-[84vh] lg:flex-row lg:gap-4">
-      <article className="overflow-hidden rounded-3xl border border-zinc-800/80 bg-zinc-900/70 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] lg:flex-1">
-        <div className="relative aspect-square w-full bg-zinc-800/80 lg:h-full">
+      <article className="ui-surface-card overflow-hidden rounded-3xl border ui-border shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] lg:flex-1">
+        <div className="ui-surface-input relative aspect-square w-full lg:h-full">
           <Image
             src={imageUrl}
             alt={`Publication ${post.id}`}
@@ -53,13 +53,13 @@ export default async function PostDetailPage({ params }: PostPageProps) {
 
       <aside
         id="comments"
-        className="flex max-h-full flex-col rounded-3xl border border-zinc-800/80 bg-zinc-900/70 p-4 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] lg:w-[25rem]"
+        className="ui-surface-card flex max-h-full flex-col rounded-3xl border ui-border p-4 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] lg:w-[25rem]"
       >
-        <header className="mb-4 border-b border-zinc-800 pb-3">
+        <header className="mb-4 border-b ui-border pb-3">
           {authorUsername ? (
             <Link
               href={`/users/${encodeURIComponent(authorUsername)}`}
-              className="text-sm font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-zinc-900"
+              className="text-sm font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
             >
               {authorLabel}
             </Link>
@@ -73,7 +73,9 @@ export default async function PostDetailPage({ params }: PostPageProps) {
 
         <div className="flex-1 overflow-y-auto pr-1">
           {comments.length === 0 ? (
-            <p className="text-sm text-zinc-500">Pas encore de commentaires.</p>
+            <p className="ui-text-subtle text-sm">
+              Pas encore de commentaires.
+            </p>
           ) : (
             <ul className="flex flex-col gap-3">
               {comments.map((comment) => {
@@ -86,12 +88,12 @@ export default async function PostDetailPage({ params }: PostPageProps) {
                 return (
                   <li
                     key={comment.id}
-                    className="rounded-xl border border-zinc-800/70 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200"
+                    className="ui-surface-input rounded-xl border ui-border px-3 py-2 text-sm text-zinc-200"
                   >
                     {commentAuthorUsername ? (
                       <Link
                         href={`/users/${encodeURIComponent(commentAuthorUsername)}`}
-                        className="font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-zinc-900"
+                        className="font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
                       >
                         {commentAuthorLabel}
                       </Link>
@@ -100,7 +102,7 @@ export default async function PostDetailPage({ params }: PostPageProps) {
                         {commentAuthorLabel}
                       </span>
                     )}
-                    <span className="text-zinc-400">: </span>
+                    <span className="ui-text-muted">: </span>
                     {comment.text}
                   </li>
                 );
@@ -109,14 +111,14 @@ export default async function PostDetailPage({ params }: PostPageProps) {
           )}
         </div>
 
-        <footer className="mt-4 border-t border-zinc-800 pt-4">
-          <div className="flex items-center gap-3 text-zinc-300">
+        <footer className="mt-4 border-t ui-border pt-4">
+          <div className="ui-text-muted flex items-center gap-3">
             <LikeButton
               postId={post.id}
               initialLiked={post.viewer_has_liked}
               initialCount={post.like_count}
             />
-            <span className="inline-flex items-center gap-2 rounded-full bg-zinc-800/70 px-2.5 py-1.5 text-xs font-medium text-zinc-300">
+            <span className="ui-surface-input inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-xs font-medium text-zinc-300">
               <CommentIcon className="h-4 w-4" />
               {comments.length}
             </span>

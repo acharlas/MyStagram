@@ -14,19 +14,20 @@ import {
   SETTINGS_MAX_AVATAR_SIZE_BYTES,
 } from "./constants";
 
-type UpdateProfileActionResult = {
-  success: boolean;
-  message: string | null;
-};
-
-const ALLOWED_AVATAR_TYPES = new Set(SETTINGS_ALLOWED_AVATAR_MIME_TYPES);
+const ALLOWED_AVATAR_TYPES: ReadonlySet<string> = new Set(
+  SETTINGS_ALLOWED_AVATAR_MIME_TYPES,
+);
 const BACKEND_BASE_URL = process.env.BACKEND_API_URL ?? "http://backend:8000";
 const MAX_AVATAR_SIZE_MB =
   SETTINGS_MAX_AVATAR_SIZE_BYTES / SETTINGS_AVATAR_SIZE_UNIT;
+const SETTINGS_GENERIC_ERROR = "La mise à jour a échoué.";
 
-export async function updateProfileAction(
-  formData: FormData,
-): Promise<UpdateProfileActionResult> {
+function redirectToSettingsError(message: string): never {
+  const searchParams = new URLSearchParams({ error: message });
+  redirect(`/settings?${searchParams.toString()}`);
+}
+
+export async function updateProfileAction(formData: FormData): Promise<void> {
   const session = await getServerSession(authOptions);
   const accessToken = session?.accessToken as string | undefined;
   const sessionUser = session?.user as { username?: string } | undefined;
@@ -36,10 +37,7 @@ export async function updateProfileAction(
       : undefined;
 
   if (!accessToken) {
-    return {
-      success: false,
-      message: "Session expirée. Veuillez vous reconnecter.",
-    };
+    redirectToSettingsError("Session expirée. Veuillez vous reconnecter.");
   }
 
   const usernameRaw = formData.get("username");
@@ -53,33 +51,27 @@ export async function updateProfileAction(
   const bio = typeof bioRaw === "string" ? bioRaw.trim() : "";
 
   if (name.length > SETTINGS_DISPLAY_NAME_MAX_LENGTH) {
-    return {
-      success: false,
-      message: `Le nom complet ne peut pas dépasser ${SETTINGS_DISPLAY_NAME_MAX_LENGTH} caractères.`,
-    };
+    redirectToSettingsError(
+      `Le nom complet ne peut pas dépasser ${SETTINGS_DISPLAY_NAME_MAX_LENGTH} caractères.`,
+    );
   }
 
   if (bio.length > SETTINGS_BIO_MAX_LENGTH) {
-    return {
-      success: false,
-      message: `La biographie ne peut pas dépasser ${SETTINGS_BIO_MAX_LENGTH} caractères.`,
-    };
+    redirectToSettingsError(
+      `La biographie ne peut pas dépasser ${SETTINGS_BIO_MAX_LENGTH} caractères.`,
+    );
   }
 
   let avatarFile: File | null = null;
   if (avatarRaw instanceof File && avatarRaw.size > 0) {
     if (avatarRaw.size > SETTINGS_MAX_AVATAR_SIZE_BYTES) {
-      return {
-        success: false,
-        message: `L'image est trop volumineuse (max ${MAX_AVATAR_SIZE_MB} Mo).`,
-      };
+      redirectToSettingsError(
+        `L'image est trop volumineuse (max ${MAX_AVATAR_SIZE_MB} Mo).`,
+      );
     }
 
     if (!ALLOWED_AVATAR_TYPES.has(avatarRaw.type)) {
-      return {
-        success: false,
-        message: "Format d'image non supporté.",
-      };
+      redirectToSettingsError("Format d'image non supporté.");
     }
 
     avatarFile = avatarRaw;
@@ -105,17 +97,17 @@ export async function updateProfileAction(
   );
 
   if (!response.ok) {
-    let message: string | null = "La mise à jour a échoué.";
+    let message = SETTINGS_GENERIC_ERROR;
     try {
       const json = (await response.json()) as { detail?: string };
-      if (json?.detail) {
+      if (typeof json?.detail === "string" && json.detail.trim().length > 0) {
         message = json.detail;
       }
+      console.error("Profile update failed", json?.detail ?? "unknown error");
     } catch {
-      message = "La mise à jour a échoué.";
+      console.error("Profile update failed");
     }
-
-    return { success: false, message };
+    redirectToSettingsError(message);
   }
 
   revalidatePath("/settings");
@@ -125,8 +117,5 @@ export async function updateProfileAction(
     redirect(`/users/${profileUsername}`);
   }
 
-  return {
-    success: true,
-    message: null,
-  };
+  return;
 }

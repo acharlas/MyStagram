@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-import { getSessionServer } from "../../../lib/auth/session";
+import { getSessionServer } from "@/lib/auth/session";
 
 import { RegisterForm } from "./_components/register-form";
 
@@ -69,7 +69,7 @@ export async function registerUser(
 
 export default async function RegisterPage() {
   const session = await getSessionServer();
-  if (session) {
+  if (session?.accessToken && !session.error) {
     redirect("/");
   }
 

@@ -24,8 +24,8 @@ vi.mock("@/lib/api/client", async () => {
   };
 });
 
-import { POST } from "../../app/api/logout/route";
 import { ApiError } from "@/lib/api/client";
+import { POST } from "../../app/api/logout/route";
 
 describe("POST /api/logout", () => {
   it("forwards access and refresh tokens to backend logout", async () => {

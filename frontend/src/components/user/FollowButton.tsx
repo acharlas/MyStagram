@@ -57,7 +57,7 @@ export function FollowButton({
       className={[
         "rounded-full px-4 py-1.5 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-500/70",
         isFollowing
-          ? "border border-zinc-700 bg-transparent text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800"
+          ? "ui-surface-input border ui-border text-zinc-200 hover:border-[color:var(--ui-border-strong)] hover:bg-[color:var(--ui-surface-muted)]"
           : "bg-sky-600 text-white hover:bg-sky-500",
         "disabled:cursor-not-allowed disabled:opacity-60",
       ].join(" ")}

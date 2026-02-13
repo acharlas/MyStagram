@@ -32,16 +32,18 @@ vi.mock("@/lib/api/client", () => ({
 }));
 
 import { ApiError } from "@/lib/api/client";
-import {
-  DELETE as unlikePostRoute,
-  POST as likePostRoute,
-} from "../../app/api/posts/[postId]/likes/route";
 import { POST as commentPostRoute } from "../../app/api/posts/[postId]/comments/route";
+import {
+  POST as likePostRoute,
+  DELETE as unlikePostRoute,
+} from "../../app/api/posts/[postId]/likes/route";
 
 describe("post route handlers", () => {
   it("propagates backend error status for like endpoint", async () => {
     getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
-    likePostRequestMock.mockRejectedValueOnce(new ApiError(404, "Post not found"));
+    likePostRequestMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
 
     const response = await likePostRoute(new Request("http://localhost"), {
       params: { postId: "42" },

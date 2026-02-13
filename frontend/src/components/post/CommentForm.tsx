@@ -57,7 +57,7 @@ export function CommentForm({ postId }: CommentFormProps) {
         value={value}
         onChange={(event) => setValue(event.target.value)}
         placeholder="Écrire un commentaire…"
-        className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-600"
+        className="ui-surface-input rounded-lg border ui-border px-3 py-2 text-sm text-zinc-100 placeholder:text-[color:var(--ui-text-subtle)] focus:outline-none focus:ring-2 focus:ring-sky-500/50"
         disabled={isPending}
         autoComplete="off"
       />
@@ -65,7 +65,7 @@ export function CommentForm({ postId }: CommentFormProps) {
       <button
         type="submit"
         disabled={isPending}
-        className="self-end rounded-lg bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-900 transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+        className="self-end rounded-lg bg-sky-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
       >
         Publier
       </button>

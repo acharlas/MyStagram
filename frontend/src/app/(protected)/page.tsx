@@ -42,16 +42,16 @@ function PostCard({ post }: { post: FeedPost }) {
     .toUpperCase();
 
   return (
-    <article className="group rounded-3xl border border-zinc-800/80 bg-zinc-900/70 p-4 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] backdrop-blur sm:p-5">
+    <article className="ui-surface-card group rounded-3xl border ui-border p-4 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] backdrop-blur sm:p-5">
       <header className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 text-sm font-semibold text-zinc-200 ring-1 ring-zinc-700/70">
+        <div className="ui-surface-muted flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold text-zinc-200 ring-1 ring-[color:var(--ui-border)]">
           {initials || displayName.slice(0, 2).toUpperCase()}
         </div>
         <div className="min-w-0 text-sm">
           {authorUsername ? (
             <Link
               href={`/users/${encodeURIComponent(authorUsername)}`}
-              className="truncate font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-zinc-900"
+              className="truncate font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
             >
               {displayName}
             </Link>
@@ -61,16 +61,16 @@ function PostCard({ post }: { post: FeedPost }) {
             </p>
           )}
           {authorUsername ? (
-            <p className="truncate text-xs text-zinc-400">@{authorUsername}</p>
+            <p className="ui-text-muted truncate text-xs">@{authorUsername}</p>
           ) : null}
         </div>
       </header>
 
       <Link
         href={`/posts/${post.id}`}
-        className="mt-4 block overflow-hidden rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-zinc-900"
+        className="mt-4 block overflow-hidden rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
       >
-        <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-zinc-800/80">
+        <div className="ui-surface-input relative aspect-square w-full overflow-hidden rounded-2xl">
           <Image
             src={imageUrl}
             alt={`Publication ${post.id}`}
@@ -87,10 +87,10 @@ function PostCard({ post }: { post: FeedPost }) {
           {safeCaption}
         </p>
       ) : (
-        <p className="mt-3 text-sm text-zinc-500">Aucune légende</p>
+        <p className="ui-text-subtle mt-3 text-sm">Aucune légende</p>
       )}
 
-      <footer className="mt-4 flex items-center gap-3 text-zinc-300">
+      <footer className="ui-text-muted mt-4 flex items-center gap-3">
         <LikeButton
           postId={post.id}
           initialLiked={post.viewer_has_liked}
@@ -98,7 +98,7 @@ function PostCard({ post }: { post: FeedPost }) {
         />
         <Link
           href={`/posts/${post.id}`}
-          className="inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-sm text-zinc-300 transition hover:bg-zinc-800 hover:text-zinc-100"
+          className="inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-sm text-zinc-300 transition hover:bg-[color:var(--ui-surface-muted)] hover:text-zinc-100"
           aria-label="Voir les commentaires"
         >
           <CommentIcon className="h-4 w-4" />
@@ -116,15 +116,17 @@ export default async function ProtectedHomePage() {
 
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-5 pb-6 pt-2">
-      <header className="rounded-2xl border border-zinc-800/70 bg-zinc-900/55 px-4 py-3 backdrop-blur">
-        <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Feed</p>
+      <header className="ui-surface-card rounded-2xl border ui-border px-4 py-3 backdrop-blur">
+        <p className="ui-text-subtle text-xs uppercase tracking-[0.2em]">
+          Feed
+        </p>
         <h1 className="mt-1 text-xl font-semibold tracking-tight text-zinc-100">
           Pour vous
         </h1>
       </header>
 
       {posts.length === 0 ? (
-        <div className="rounded-2xl border border-zinc-800/70 bg-zinc-900/60 p-6 text-center text-sm text-zinc-400">
+        <div className="ui-surface-card ui-text-muted rounded-2xl border ui-border p-6 text-center text-sm">
           <p>Le fil d&apos;actualité est vide pour le moment.</p>
           <Link
             href="/posts/new"

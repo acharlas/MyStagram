@@ -1,5 +1,11 @@
 import type { NextConfig } from "next";
 
+type ImagesConfig = NonNullable<NextConfig["images"]>;
+type NextRemotePattern = Exclude<
+  NonNullable<ImagesConfig["remotePatterns"]>[number],
+  URL
+>;
+
 const nextConfig: NextConfig = (() => {
   const base =
     process.env.NEXT_PUBLIC_MINIO_BASE_URL ??
@@ -8,15 +14,22 @@ const nextConfig: NextConfig = (() => {
 
   try {
     const url = new URL(base);
+    const protocol = url.protocol.replace(/:$/u, "");
+    if (protocol !== "http" && protocol !== "https") {
+      throw new Error("Unsupported image URL protocol");
+    }
+
+    const remotePattern: NextRemotePattern = {
+      protocol,
+      hostname: url.hostname,
+      pathname: `${url.pathname.replace(/\/$/u, "")}/**`,
+    };
+    if (url.port) {
+      remotePattern.port = url.port;
+    }
+
     images = {
-      remotePatterns: [
-        {
-          protocol: url.protocol.replace(/:$/u, ""),
-          hostname: url.hostname,
-          port: url.port || undefined,
-          pathname: `${url.pathname.replace(/\/$/u, "")}/**`,
-        },
-      ],
+      remotePatterns: [remotePattern],
     };
   } catch {
     images = undefined;

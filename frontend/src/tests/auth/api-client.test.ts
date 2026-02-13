@@ -102,7 +102,8 @@ describe("apiServerFetch", () => {
       "http://backend:8000/api/test",
       expect.objectContaining({
         headers: expect.objectContaining({
-          Cookie: "theme=dark; access_token=explicit-access; refresh_token=store-refresh",
+          Cookie:
+            "theme=dark; access_token=explicit-access; refresh_token=store-refresh",
           Authorization: "Bearer explicit-access",
         }),
       }),

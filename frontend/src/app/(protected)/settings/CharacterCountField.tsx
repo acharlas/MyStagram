@@ -31,7 +31,7 @@ export function CharacterCountField({
   };
 
   const inputClassName =
-    "w-full rounded-xl border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/70";
+    "ui-surface-input w-full rounded-xl border ui-border px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/70";
 
   const commonProps = {
     id,
@@ -44,7 +44,7 @@ export function CharacterCountField({
 
   return (
     <div className="space-y-1.5">
-      <label htmlFor={id} className="block text-sm font-medium text-zinc-300">
+      <label htmlFor={id} className="ui-text-muted block text-sm font-medium">
         {label}
       </label>
       {multiline ? (
@@ -52,7 +52,7 @@ export function CharacterCountField({
       ) : (
         <input {...commonProps} type="text" />
       )}
-      <p className="text-right text-xs text-zinc-500">
+      <p className="ui-text-subtle text-right text-xs">
         {count} / {maxLength}
       </p>
     </div>

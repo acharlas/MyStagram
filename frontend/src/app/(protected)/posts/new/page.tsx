@@ -6,7 +6,7 @@ export default function NewPostPage() {
       <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">
         Nouvelle publication
       </h1>
-      <p className="text-sm text-zinc-400">
+      <p className="ui-text-muted text-sm">
         Sélectionnez une image, ajoutez une légende, puis publiez.
       </p>
       <PostForm />

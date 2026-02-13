@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { ApiError } from "@/lib/api/client";
-import { getSessionServer } from "@/lib/auth/session";
 import { createPostComment } from "@/lib/api/posts";
+import { getSessionServer } from "@/lib/auth/session";
 
 type RouteParams = {
   params: Promise<{ postId: string }> | { postId: string };

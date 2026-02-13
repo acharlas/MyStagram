@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   fetchUserFollowers,
+  fetchUserFollowStatus,
   fetchUserPosts,
   fetchUserProfile,
   followUserRequest,
@@ -124,6 +125,39 @@ describe("fetchUserFollowers", () => {
     const result = await fetchUserFollowers("demo");
 
     expect(result).toEqual([]);
+  });
+});
+
+describe("fetchUserFollowStatus", () => {
+  it("returns follow status when backend call succeeds", async () => {
+    apiServerFetchMock.mockResolvedValueOnce({ is_following: true });
+
+    const result = await fetchUserFollowStatus("demo", "token-1");
+
+    expect(result).toBe(true);
+    expect(apiServerFetchMock).toHaveBeenCalledWith(
+      "/api/v1/users/demo/follow-status",
+      expect.objectContaining({
+        headers: {
+          Cookie: "access_token=token-1",
+        },
+      }),
+    );
+  });
+
+  it("returns false when no token is provided", async () => {
+    const result = await fetchUserFollowStatus("demo");
+
+    expect(result).toBe(false);
+    expect(apiServerFetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns false when backend call fails", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
+
+    const result = await fetchUserFollowStatus("demo", "token-1");
+
+    expect(result).toBe(false);
   });
 });
 

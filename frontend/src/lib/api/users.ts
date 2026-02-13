@@ -24,6 +24,10 @@ export type UserProfilePublic = {
   avatar_key: string | null;
 };
 
+export type FollowStatusResponse = {
+  is_following: boolean;
+};
+
 export type FollowMutationResult = {
   success: boolean;
   status: number;
@@ -97,6 +101,32 @@ export async function fetchUserFollowers(
   } catch (error) {
     console.error("Failed to load user followers", error);
     return [];
+  }
+}
+
+export async function fetchUserFollowStatus(
+  username: string,
+  accessToken?: string,
+): Promise<boolean> {
+  if (!accessToken) {
+    return false;
+  }
+
+  try {
+    const result = await apiServerFetch<FollowStatusResponse>(
+      `${buildProfilePath(username)}/follow-status`,
+      {
+        cache: "no-store",
+        headers: buildHeaders(accessToken),
+      },
+    );
+    return result.is_following;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return false;
+    }
+    console.error("Failed to load follow status", error);
+    return false;
   }
 }
 

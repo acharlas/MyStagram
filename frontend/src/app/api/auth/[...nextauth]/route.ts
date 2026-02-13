@@ -45,7 +45,9 @@ function parseTokenPayload(token: string): Record<string, unknown> | null {
 
   try {
     const payloadPart = tokenParts[1];
-    const decodedPayload = Buffer.from(payloadPart, "base64url").toString("utf-8");
+    const decodedPayload = Buffer.from(payloadPart, "base64url").toString(
+      "utf-8",
+    );
     const parsed = JSON.parse(decodedPayload) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return null;
@@ -123,7 +125,9 @@ function storeRecentRefreshResult(
   enforceRecentRefreshResultLimit();
 }
 
-async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
+async function refreshAccessToken(
+  refreshToken: string,
+): Promise<TokenResponse> {
   const response = await fetch(buildApiUrl("/api/v1/auth/refresh"), {
     method: "POST",
     headers: {
@@ -260,7 +264,7 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        return authorizeWithCredentials(credentials);
+        return authorizeWithCredentials(credentials ?? {});
       },
     }),
   ],
@@ -276,7 +280,9 @@ export const authOptions: NextAuthOptions = {
         token.avatarUrl = authorizedUser.avatarUrl;
         token.accessToken = authorizedUser.accessToken;
         token.refreshToken = authorizedUser.refreshToken;
-        token.accessTokenExpires = readAccessTokenExpiry(authorizedUser.accessToken);
+        token.accessTokenExpires = readAccessTokenExpiry(
+          authorizedUser.accessToken,
+        );
         token.error = undefined;
         clearRefreshFailureState(token);
         return token;
@@ -316,15 +322,14 @@ export const authOptions: NextAuthOptions = {
         token.error = undefined;
         clearRefreshFailureState(token);
       } catch (error) {
-        if (
-          error instanceof RefreshAccessTokenError &&
-          error.status === 401
-        ) {
+        if (error instanceof RefreshAccessTokenError && error.status === 401) {
           const cached = getRecentRefreshResult(currentRefreshToken);
           if (cached) {
             token.accessToken = cached.access_token;
             token.refreshToken = cached.refresh_token;
-            token.accessTokenExpires = readAccessTokenExpiry(cached.access_token);
+            token.accessTokenExpires = readAccessTokenExpiry(
+              cached.access_token,
+            );
             token.error = undefined;
             clearRefreshFailureState(token);
             return token;

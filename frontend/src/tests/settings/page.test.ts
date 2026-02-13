@@ -92,4 +92,28 @@ describe("SettingsPage", () => {
 
     expect(html).toContain("Impossible de charger votre profil");
   });
+
+  it("renders server action error feedback when provided in search params", async () => {
+    mockedGetServerSession.mockResolvedValue({
+      accessToken: "token-123",
+    } as Awaited<ReturnType<typeof getServerSession>>);
+
+    mockedApiServerFetch.mockResolvedValue({
+      username: "alice",
+      name: "Alice Demo",
+      bio: "Bio",
+      avatar_key: null,
+    });
+
+    const html = renderToStaticMarkup(
+      await SettingsPage({
+        searchParams: Promise.resolve({
+          error: "Format d'image non supporté.",
+        }),
+      }),
+    );
+
+    expect(html).toContain("Format d&#x27;image non supporté.");
+    expect(html).toContain('role="alert"');
+  });
 });

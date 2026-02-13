@@ -420,7 +420,10 @@ describe("JWT and session callbacks", () => {
       }),
     });
 
-    const [firstJwt, secondJwt] = await Promise.all([firstRefresh, secondRefresh]);
+    const [firstJwt, secondJwt] = await Promise.all([
+      firstRefresh,
+      secondRefresh,
+    ]);
     expect(firstJwt).toMatchObject({
       accessToken: refreshedAccessToken,
       refreshToken: "refresh-token-new",
@@ -465,8 +468,8 @@ describe("JWT and session callbacks", () => {
       } as never);
     }
 
-    expect(authModule.__internal.getRecentRefreshResultsSizeForTests()).toBeLessThanOrEqual(
-      256,
-    );
+    expect(
+      authModule.__internal.getRecentRefreshResultsSizeForTests(),
+    ).toBeLessThanOrEqual(256);
   });
 });

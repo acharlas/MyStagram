@@ -12,12 +12,19 @@ export type ApiRequestOptions = RequestInit & {
   headers?: HeadersInit;
 };
 
+export type ApiPage<T> = {
+  data: T;
+  nextOffset: number | null;
+};
+
 const DEFAULT_HEADERS: HeadersInit = {
   "Content-Type": "application/json",
 };
 const FORWARDED_AUTH_COOKIE_NAMES = new Set(["access_token", "refresh_token"]);
 
-async function readApiErrorMessage(response: Response): Promise<string | undefined> {
+async function readApiErrorMessage(
+  response: Response,
+): Promise<string | undefined> {
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
     try {
@@ -126,13 +133,27 @@ function parseCookieHeader(cookieHeader?: string): Map<string, string> {
   return parsed;
 }
 
-function serializeCookieHeader(cookieValues: Map<string, string>): string | undefined {
+function serializeCookieHeader(
+  cookieValues: Map<string, string>,
+): string | undefined {
   if (cookieValues.size === 0) {
     return undefined;
   }
   return Array.from(cookieValues.entries())
     .map(([name, value]) => `${name}=${value}`)
     .join("; ");
+}
+
+function parseNextOffsetHeader(response: Response): number | null {
+  const raw = response.headers.get("x-next-offset");
+  if (!raw) {
+    return null;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return null;
+  }
+  return parsed;
 }
 
 export async function apiFetch<T = unknown>(
@@ -154,10 +175,10 @@ export async function apiFetch<T = unknown>(
   return (await response.json()) as T;
 }
 
-export async function apiServerFetch<T = unknown>(
+async function apiServerFetchResponse(
   path: string,
   options: ApiRequestOptions = {},
-): Promise<T> {
+): Promise<Response> {
   if (typeof window !== "undefined") {
     throw new Error("apiServerFetch can only be invoked on the server");
   }
@@ -195,8 +216,34 @@ export async function apiServerFetch<T = unknown>(
     }
   }
 
-  return apiFetch<T>(url, {
+  const response = await fetch(url, {
     ...options,
-    headers,
+    headers: {
+      ...DEFAULT_HEADERS,
+      ...headers,
+    },
   });
+  if (!response.ok) {
+    throw new ApiError(response.status, await readApiErrorMessage(response));
+  }
+  return response;
+}
+
+export async function apiServerFetch<T = unknown>(
+  path: string,
+  options: ApiRequestOptions = {},
+): Promise<T> {
+  const response = await apiServerFetchResponse(path, options);
+  return (await response.json()) as T;
+}
+
+export async function apiServerFetchPage<T = unknown>(
+  path: string,
+  options: ApiRequestOptions = {},
+): Promise<ApiPage<T>> {
+  const response = await apiServerFetchResponse(path, options);
+  return {
+    data: (await response.json()) as T,
+    nextOffset: parseNextOffsetHeader(response),
+  };
 }

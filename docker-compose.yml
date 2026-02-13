@@ -79,6 +79,7 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      - frontend-next:/app/.next
     ports:
       - "3000:3000"
 
@@ -86,3 +87,4 @@ volumes:
   postgres-data:
   redis-data:
   minio-data:
+  frontend-next:

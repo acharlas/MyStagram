@@ -1,10 +1,12 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import type { JWT } from "next-auth/jwt";
 import { getToken } from "next-auth/jwt";
 
 const AUTH_PAGES = new Set(["/login", "/register"]);
 const PUBLIC_FILE_PATHS = new Set(["/favicon.ico", "/site.webmanifest"]);
 const ACCESS_TOKEN_REFRESH_SKEW_MS = 5 * 1000;
+type SessionToken = Awaited<ReturnType<typeof getToken>>;
 
 function normalizePathname(pathname: string) {
   if (pathname === "/") {
@@ -61,7 +63,7 @@ function readJwtExp(accessToken: string): number | null {
   return null;
 }
 
-function resolveTokenExpiry(token: NonNullable<Awaited<ReturnType<typeof getToken>>>) {
+function resolveTokenExpiry(token: JWT) {
   if (
     typeof token.accessTokenExpires === "number" &&
     Number.isFinite(token.accessTokenExpires)
@@ -74,19 +76,30 @@ function resolveTokenExpiry(token: NonNullable<Awaited<ReturnType<typeof getToke
   return null;
 }
 
-function hasUsableAccessToken(token: Awaited<ReturnType<typeof getToken>>) {
-  if (!token) {
+function asJwtToken(token: SessionToken): JWT | null {
+  if (!token || typeof token === "string") {
+    return null;
+  }
+  return token;
+}
+
+function hasUsableAccessToken(token: SessionToken) {
+  const jwtToken = asJwtToken(token);
+  if (!jwtToken) {
     return false;
   }
-  if (typeof token.error === "string" && token.error.length > 0) {
+  if (typeof jwtToken.error === "string" && jwtToken.error.length > 0) {
     return false;
   }
 
-  if (typeof token.accessToken !== "string" || token.accessToken.length === 0) {
+  if (
+    typeof jwtToken.accessToken !== "string" ||
+    jwtToken.accessToken.length === 0
+  ) {
     return false;
   }
 
-  const expiresAt = resolveTokenExpiry(token);
+  const expiresAt = resolveTokenExpiry(jwtToken);
   if (!expiresAt) {
     return false;
   }
@@ -94,18 +107,26 @@ function hasUsableAccessToken(token: Awaited<ReturnType<typeof getToken>>) {
   return expiresAt > Date.now() + ACCESS_TOKEN_REFRESH_SKEW_MS;
 }
 
-function canRefreshAccessToken(token: Awaited<ReturnType<typeof getToken>>) {
-  if (!token) {
+function canRefreshAccessToken(token: SessionToken) {
+  const jwtToken = asJwtToken(token);
+  if (!jwtToken) {
     return false;
   }
-  return typeof token.refreshToken === "string" && token.refreshToken.length > 0;
+  return (
+    typeof jwtToken.refreshToken === "string" &&
+    jwtToken.refreshToken.length > 0
+  );
 }
 
-function isTerminalTokenError(token: Awaited<ReturnType<typeof getToken>>) {
-  if (!token || typeof token.error !== "string") {
+function isTerminalTokenError(token: SessionToken) {
+  const jwtToken = asJwtToken(token);
+  if (!jwtToken || typeof jwtToken.error !== "string") {
     return false;
   }
-  return token.error === "SessionExpired" || token.error === "RefreshAccessTokenError";
+  return (
+    jwtToken.error === "SessionExpired" ||
+    jwtToken.error === "RefreshAccessTokenError"
+  );
 }
 
 function buildLoginRedirect(request: NextRequest) {
@@ -127,10 +148,7 @@ export async function middleware(request: NextRequest) {
 
   if (AUTH_PAGES.has(normalizedPath)) {
     const token = await readSessionToken(request);
-    if (
-      !isTerminalTokenError(token) &&
-      (hasUsableAccessToken(token) || canRefreshAccessToken(token))
-    ) {
+    if (!isTerminalTokenError(token) && hasUsableAccessToken(token)) {
       return NextResponse.redirect(new URL("/", request.url));
     }
     return NextResponse.next();

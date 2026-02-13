@@ -66,6 +66,34 @@ describe("middleware token expiry checks", () => {
     expect(response?.status).toBe(200);
   });
 
+  it("keeps login page accessible when only refresh token exists", async () => {
+    getTokenMock.mockResolvedValueOnce({
+      refreshToken: "refresh-token",
+    });
+
+    const response = await middleware(
+      new NextRequest("http://localhost/login"),
+    );
+
+    expect(response?.status).toBe(200);
+  });
+
+  it("redirects authenticated users away from login page", async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const validJwt = buildJwtWithExp(nowSeconds + 60);
+    getTokenMock.mockResolvedValueOnce({
+      accessToken: validJwt,
+      accessTokenExpires: Date.now() + 60_000,
+    });
+
+    const response = await middleware(
+      new NextRequest("http://localhost/login"),
+    );
+
+    expect(response?.status).toBe(307);
+    expect(response?.headers.get("location")).toContain("/");
+  });
+
   it("excludes internal API routes from middleware matcher", () => {
     expect(config.matcher).toContain(
       "/((?!api(?:/|$)|_next/|favicon.ico|site.webmanifest).*)",

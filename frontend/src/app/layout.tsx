@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     template: "%s | MyStagram",
   },
   description:
-    "Share photos, discover creators, and stay close to your people.",
+    "Partagez vos photos, découvrez des créateurs et restez proche de votre communauté.",
 };
 
 export default function RootLayout({

@@ -1,14 +1,35 @@
 @import "tailwindcss";
 
 :root {
-  --background: #060b14;
-  --background-elevated: #0b1220;
-  --surface: #111827;
-  --surface-strong: #0f172a;
-  --foreground: #e5e7eb;
-  --foreground-muted: #94a3b8;
+  --background: #060d1b;
+  --foreground: #e6edf8;
   --accent: #38bdf8;
-  --accent-strong: #0ea5e9;
+  --ui-surface-nav: linear-gradient(
+    155deg,
+    rgb(10 19 37 / 96%) 0%,
+    rgb(6 13 27 / 92%) 100%
+  );
+  --ui-surface-card: linear-gradient(
+    180deg,
+    rgb(28 48 82 / 78%) 0%,
+    rgb(18 33 58 / 72%) 100%
+  );
+  --ui-surface-card-strong: linear-gradient(
+    180deg,
+    rgb(41 72 118 / 92%) 0%,
+    rgb(28 50 84 / 88%) 100%
+  );
+  --ui-surface-input: linear-gradient(
+    180deg,
+    rgb(9 19 37 / 95%) 0%,
+    rgb(6 13 27 / 91%) 100%
+  );
+  --ui-surface-muted: rgb(84 120 176 / 28%);
+  --ui-surface-overlay: rgb(4 9 18 / 62%);
+  --ui-border: rgb(148 163 184 / 30%);
+  --ui-border-strong: rgb(191 219 254 / 50%);
+  --ui-text-muted: #c6d6ef;
+  --ui-text-subtle: #acbfdf;
 }
 
 @theme inline {
@@ -39,7 +60,7 @@ body {
       70rem 40rem at 110% 110%,
       rgb(59 130 246 / 14%),
       transparent 65%
-    ), linear-gradient(180deg, #050913 0%, #080d18 100%);
+    ), linear-gradient(180deg, #060b16 0%, #091023 100%);
   color: var(--foreground);
   font-family: var(--font-sora), "Avenir Next", "Segoe UI", sans-serif;
 }
@@ -47,4 +68,54 @@ body {
 ::selection {
   background: rgb(56 189 248 / 35%);
   color: #e2e8f0;
+}
+
+.ui-surface-nav {
+  background: var(--ui-surface-nav);
+  box-shadow: inset 0 1px 0 rgb(191 219 254 / 8%);
+}
+
+.ui-surface-card {
+  background: var(--ui-surface-card);
+}
+
+.ui-surface-card-strong {
+  background: var(--ui-surface-card-strong);
+}
+
+.ui-surface-input {
+  background: var(--ui-surface-input);
+}
+
+.ui-surface-muted {
+  background-color: var(--ui-surface-muted);
+}
+
+.ui-surface-overlay {
+  background-color: var(--ui-surface-overlay);
+}
+
+.ui-border {
+  border-color: var(--ui-border);
+}
+
+.ui-text-muted {
+  color: var(--ui-text-muted);
+}
+
+.ui-text-subtle {
+  color: var(--ui-text-subtle);
+}
+
+.ui-hover-surface {
+  transition-property: color, background-color, border-color;
+  transition-duration: 200ms;
+}
+
+.ui-hover-surface:hover {
+  background-color: var(--ui-surface-muted);
+}
+
+.ui-hover-surface:focus-visible {
+  background-color: var(--ui-surface-muted);
 }

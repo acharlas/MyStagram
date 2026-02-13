@@ -15,11 +15,13 @@ export function Button({ variant = "primary", ...props }: ButtonProps) {
   switch (variant) {
     case "secondary":
       classes.push(
-        "border-zinc-700 bg-zinc-900 text-zinc-100 hover:border-zinc-500 hover:bg-zinc-800",
+        "ui-surface-input ui-border text-zinc-100 hover:border-[color:var(--ui-border-strong)] hover:bg-[color:var(--ui-surface-muted)]",
       );
       break;
     case "ghost":
-      classes.push("border-transparent text-zinc-300 hover:bg-zinc-800");
+      classes.push(
+        "border-transparent text-zinc-300 hover:bg-[color:var(--ui-surface-muted)]",
+      );
       break;
     default:
       classes.push("border-transparent bg-sky-600 text-white hover:bg-sky-500");

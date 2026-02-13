@@ -9,7 +9,7 @@ export default async function ProtectedLayout({
   children: ReactNode;
 }) {
   const session = await getSessionServer();
-  const username = session?.user?.username ?? session?.user?.name ?? "";
+  const username = session?.user?.username ?? "";
 
   return (
     <div className="min-h-screen bg-transparent text-zinc-100 lg:flex">
