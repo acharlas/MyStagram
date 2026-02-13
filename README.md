@@ -75,7 +75,26 @@ The sample values above are safe defaults for local development. Replace the pla
    - Backend docs: http://localhost:8000/docs  
    - MinIO console: http://localhost:9001
 
-3. **Stop the stack**
+3. **Seed demo data (users, follows, posts with captions and placeholder images)**
+   ```bash
+   docker compose exec backend uv run python scripts/seed.py
+   ```
+   Demo accounts:
+   - `demo_alex` / `password123`
+   - `demo_bella` / `password123`
+   - `demo_cara` / `password123`
+
+   Optional: use your own images for a richer feed.
+   - Fast path: put images directly in `backend/scripts/seed_media/` and they will be auto-distributed across demo users.
+   - Or target a user: `backend/scripts/seed_media/<username>/<image-file>`.
+   - Example: `backend/scripts/seed_media/demo_alex/beach.jpg`
+   - Re-run seed; files are uploaded to MinIO and used as feed posts.
+   - Custom media path:
+     ```bash
+     docker compose exec -e SEED_MEDIA_DIR=/app/scripts/seed_media backend uv run python scripts/seed.py
+     ```
+
+4. **Stop the stack**
    ```bash
    docker compose down
    ```
