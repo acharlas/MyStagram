@@ -61,7 +61,9 @@ describe("fetchPostDetail", () => {
   });
 
   it("returns null when backend returns 404", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new ApiError(404, "Post not found"));
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
 
     const result = await fetchPostDetail("42", "token123");
     expect(result).toBeNull();
@@ -107,7 +109,9 @@ describe("fetchPostComments", () => {
   });
 
   it("returns empty array when backend returns 404", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new ApiError(404, "Post not found"));
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
 
     const result = await fetchPostComments("42", "token123");
     expect(result).toEqual([]);

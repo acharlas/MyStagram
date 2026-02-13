@@ -123,7 +123,9 @@ export function NavBar({ username }: NavBarProps) {
           detail ?? null,
         );
       } else if (revoked === false) {
-        console.warn("Local logout completed, backend token revoke did not complete");
+        console.warn(
+          "Local logout completed, backend token revoke did not complete",
+        );
       }
     } catch (error) {
       console.error("Failed to call logout endpoint", error);

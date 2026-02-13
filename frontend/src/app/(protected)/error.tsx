@@ -13,7 +13,9 @@ export default function ProtectedError({ error, reset }: ProtectedErrorProps) {
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-4 py-10">
       <div className="ui-surface-card rounded-2xl border ui-border p-6">
-        <p className="ui-text-subtle text-xs uppercase tracking-[0.2em]">Erreur</p>
+        <p className="ui-text-subtle text-xs uppercase tracking-[0.2em]">
+          Erreur
+        </p>
         <h1 className="mt-2 text-xl font-semibold tracking-tight text-zinc-100">
           Impossible de charger cette page.
         </h1>

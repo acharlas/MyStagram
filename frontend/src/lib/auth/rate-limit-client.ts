@@ -11,9 +11,7 @@ export function buildRateLimitClientKeyFromIdentifier(
     return null;
   }
 
-  const digest = createHash("sha256")
-    .update(normalized)
-    .digest("hex");
+  const digest = createHash("sha256").update(normalized).digest("hex");
   return digest.slice(0, 32);
 }
 

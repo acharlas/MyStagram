@@ -31,4 +31,3 @@ describe("PostDetailPage error semantics", () => {
     ).rejects.toThrow("backend down");
   });
 });
-

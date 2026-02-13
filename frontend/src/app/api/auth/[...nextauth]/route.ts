@@ -206,8 +206,10 @@ export async function authorizeWithCredentials(
     return null;
   }
 
-  const { login = loginWithCredentialsWithClientKey, profile = fetchUserProfile } =
-    deps ?? {};
+  const {
+    login = loginWithCredentialsWithClientKey,
+    profile = fetchUserProfile,
+  } = deps ?? {};
 
   try {
     const tokens = await login(
@@ -239,7 +241,9 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         const identifier =
-          typeof credentials?.username === "string" ? credentials.username : null;
+          typeof credentials?.username === "string"
+            ? credentials.username
+            : null;
         const rateLimitClientKey =
           buildRateLimitClientKeyFromIdentifier(identifier);
         return authorizeWithCredentials(

@@ -1,7 +1,15 @@
+import { createHmac } from "node:crypto";
 import type * as nextAuth from "next-auth";
 import type { NextAuthOptions } from "next-auth";
-import { createHmac } from "node:crypto";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import * as authModule from "../../app/api/auth/[...nextauth]/route";
 import { getSessionServer } from "../../lib/auth/session";
@@ -122,7 +130,6 @@ describe("authorizeWithCredentials", () => {
     expect(login).not.toHaveBeenCalled();
     expect(profile).not.toHaveBeenCalled();
   });
-
 });
 
 describe("HTTP helper functions", () => {

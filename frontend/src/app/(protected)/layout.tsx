@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
+import type { ReactNode } from "react";
 
 import { NavBar } from "@/components/ui/navbar";
 import { getSessionServer } from "@/lib/auth/session";

@@ -46,7 +46,8 @@ export async function registerUser(
 
   try {
     const rateLimitClientKey = buildRateLimitClientKeyFromIdentifier(email);
-    const rateLimitSignature = buildRateLimitClientSignature(rateLimitClientKey);
+    const rateLimitSignature =
+      buildRateLimitClientSignature(rateLimitClientKey);
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
