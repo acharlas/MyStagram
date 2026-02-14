@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, func
 from sqlmodel import Field, SQLModel
 
 
@@ -11,6 +11,7 @@ class Like(SQLModel, table=True):
     """Tracks which users liked which posts."""
 
     __tablename__ = "likes"
+    __table_args__ = (Index("ix_likes_post_updated_at", "post_id", "updated_at"),)
 
     user_id: str = Field(
         sa_column=Column(
