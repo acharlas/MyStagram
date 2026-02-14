@@ -1,14 +1,13 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { signOut } from "next-auth/react";
-import type { ComponentType, KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { ComponentType } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   BrandMarkIcon,
-  CloseIcon,
   CreateIcon,
   HomeIcon,
   LogOutIcon,
@@ -20,10 +19,16 @@ import {
   resolveProfileHref,
   shouldCloseSearch,
 } from "@/components/ui/navbar-helpers";
-import { NavSearchResults } from "@/components/ui/navbar-search-results";
-import { useMobileDialogFocusTrap } from "@/components/ui/use-mobile-dialog-focus-trap";
-import { useNavSearch } from "@/components/ui/use-nav-search";
-import { useSearchInputFocus } from "@/components/ui/use-search-input-focus";
+
+const NavSearchLayer = dynamic(
+  () =>
+    import("@/components/ui/navbar-search-layer").then(
+      (module) => module.NavSearchLayer,
+    ),
+  {
+    ssr: false,
+  },
+);
 
 type NavItem = {
   href: string;
@@ -46,22 +51,11 @@ export function NavBar({ username }: NavBarProps) {
   const pathname = usePathname();
   const [isSearching, setIsSearching] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-
   const previousPathnameRef = useRef(pathname);
-  const desktopSearchInputRef = useRef<HTMLInputElement | null>(null);
-  const mobileSearchInputRef = useRef<HTMLInputElement | null>(null);
-  const mobileDialogRef = useRef<HTMLDivElement | null>(null);
+
   const handleCloseSearch = useCallback(() => {
     setIsSearching(false);
   }, []);
-  const {
-    searchQuery,
-    setSearchQuery,
-    searchResults,
-    isLoading,
-    searchError,
-    hasSearchValue,
-  } = useNavSearch(isSearching);
 
   useEffect(() => {
     if (shouldCloseSearch(previousPathnameRef.current, pathname)) {
@@ -69,26 +63,9 @@ export function NavBar({ username }: NavBarProps) {
       previousPathnameRef.current = pathname;
     }
   }, [handleCloseSearch, pathname]);
-  useSearchInputFocus({
-    isSearching,
-    desktopInputRef: desktopSearchInputRef,
-    mobileInputRef: mobileSearchInputRef,
-  });
-  useMobileDialogFocusTrap({
-    isOpen: isSearching,
-    dialogRef: mobileDialogRef,
-    onEscape: handleCloseSearch,
-  });
 
   const handleOpenSearch = () => {
     setIsSearching(true);
-  };
-
-  const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      handleCloseSearch();
-    }
   };
 
   const handleLogout = async () => {
@@ -130,13 +107,13 @@ export function NavBar({ username }: NavBarProps) {
     } catch (error) {
       console.error("Failed to call logout endpoint", error);
     } finally {
+      const { signOut } = await import("next-auth/react");
       await signOut({ callbackUrl: "/login" });
       setIsLoggingOut(false);
     }
   };
 
   const viewerName = username ?? "invité";
-  const searchInputId = "navbar-user-search";
 
   return (
     <>
@@ -160,34 +137,7 @@ export function NavBar({ username }: NavBarProps) {
             const isActive = isPathActive(pathname, href);
 
             if (item.href === "/search") {
-              return isSearching ? (
-                <div
-                  key="desktop-search-input"
-                  className="ui-surface-input flex items-center gap-2 rounded-xl border ui-border px-3 py-2 text-sm text-zinc-100 shadow-sm"
-                >
-                  <SearchIcon className="ui-text-muted h-4 w-4" />
-                  <input
-                    id={searchInputId}
-                    ref={desktopSearchInputRef}
-                    type="search"
-                    name="navbar-search"
-                    placeholder="Rechercher un utilisateur"
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    onKeyDown={handleSearchKeyDown}
-                    className="w-full bg-transparent text-sm text-zinc-100 placeholder:text-[color:var(--ui-text-subtle)] focus:outline-none"
-                    aria-label="Rechercher des utilisateurs"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCloseSearch}
-                    className="ui-text-muted ui-hover-surface rounded-md p-1 transition hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
-                    aria-label="Fermer la recherche"
-                  >
-                    <CloseIcon className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : (
+              return (
                 <button
                   key="desktop-search-button"
                   type="button"
@@ -243,22 +193,6 @@ export function NavBar({ username }: NavBarProps) {
             </div>
           </div>
         </footer>
-
-        {isSearching ? (
-          <div className="ui-surface-card-strong absolute left-full top-28 z-30 ml-5 hidden w-[22rem] rounded-2xl border ui-border p-4 text-sm text-zinc-100 shadow-2xl lg:block">
-            <div className="ui-text-muted flex items-center justify-between text-xs font-semibold tracking-[0.1em]">
-              <span>Résultats</span>
-              {isLoading ? <span className="text-xs">Chargement…</span> : null}
-            </div>
-            <NavSearchResults
-              hasSearchValue={hasSearchValue}
-              isLoading={isLoading}
-              searchError={searchError}
-              searchResults={searchResults}
-              onSelect={handleCloseSearch}
-            />
-          </div>
-        ) : null}
       </aside>
 
       <header className="ui-surface-nav sticky top-0 z-30 border-b ui-border backdrop-blur lg:hidden">
@@ -341,62 +275,7 @@ export function NavBar({ username }: NavBarProps) {
         </ul>
       </nav>
 
-      {isSearching ? (
-        <div className="fixed inset-0 z-40 px-4 pb-6 pt-20 backdrop-blur lg:hidden">
-          <button
-            type="button"
-            onClick={handleCloseSearch}
-            className="ui-surface-overlay absolute inset-0"
-            aria-label="Fermer la recherche"
-          />
-          <div
-            ref={mobileDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="mobile-search-title"
-            className="ui-surface-card-strong relative z-10 mx-auto flex h-full w-full max-w-md flex-col rounded-2xl border ui-border p-4 shadow-2xl"
-          >
-            <div className="ui-surface-input flex items-center gap-2 rounded-xl border ui-border px-3 py-2">
-              <SearchIcon className="ui-text-muted h-4 w-4" />
-              <input
-                id={`${searchInputId}-mobile`}
-                ref={mobileSearchInputRef}
-                type="search"
-                name="navbar-search-mobile"
-                placeholder="Rechercher un utilisateur"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                className="w-full bg-transparent text-sm text-zinc-100 placeholder:text-[color:var(--ui-text-subtle)] focus:outline-none"
-                aria-label="Rechercher des utilisateurs"
-              />
-              <button
-                type="button"
-                onClick={handleCloseSearch}
-                className="ui-text-muted ui-hover-surface rounded-md p-1 transition hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/70"
-                aria-label="Fermer la recherche"
-              >
-                <CloseIcon className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="ui-text-muted mt-3 flex items-center justify-between text-xs font-semibold tracking-[0.1em]">
-              <h2 id="mobile-search-title">Résultats</h2>
-              {isLoading ? <span className="text-xs">Chargement…</span> : null}
-            </div>
-
-            <NavSearchResults
-              hasSearchValue={hasSearchValue}
-              isLoading={isLoading}
-              searchError={searchError}
-              searchResults={searchResults}
-              onSelect={handleCloseSearch}
-              panelClassName="mt-3 flex-1 space-y-2 overflow-y-auto"
-              focusRingClassName="focus:outline-none focus:ring-2 focus:ring-sky-500/70"
-            />
-          </div>
-        </div>
-      ) : null}
+      {isSearching ? <NavSearchLayer onClose={handleCloseSearch} /> : null}
     </>
   );
 }
