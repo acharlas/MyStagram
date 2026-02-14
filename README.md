@@ -25,7 +25,8 @@ The repository is organised as:
 .
 ├── backend/            # FastAPI codebase
 ├── frontend/           # Next.js codebase
-├── docker-compose.yml  # Local runtime definition
+├── docker-compose.yml  # Showcase runtime (internet-facing demo baseline)
+├── docker-compose.dev.yml # Development override (hot reload + tool ports)
 ├── .env.backend        # Backend environment values (not committed)
 ├── .env.frontend       # Frontend environment values (not committed)
 └── README.md
@@ -69,15 +70,23 @@ The sample values above are safe defaults for local development. Replace the pla
 1. **Install prerequisites**
    - Docker Desktop (or Docker Engine + Compose v2)
 
-2. **Boot the stack**
+2. **Boot showcase mode (default)**
    ```bash
-   docker compose up --build
+   docker compose up --build -d
    ```
    - Frontend: http://localhost:3000  
    - Backend docs: http://localhost:8000/docs  
-   - MinIO console: http://localhost:9001
+   - Only frontend/backend are published to host.
+   - PostgreSQL, Redis, and MinIO stay on the internal Docker network.
 
-3. **Seed demo data (users, follows, posts with captions and placeholder images)**
+3. **Optional: boot development mode (hot reload + infra tool ports)**
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+   ```
+   - Enables bind mounts and reload for backend/frontend.
+   - Exposes PostgreSQL (5432), Redis (6379), MinIO API (9000), MinIO console (9001).
+
+4. **Seed demo data (users, follows, posts with captions and placeholder images)**
    ```bash
    docker compose exec backend uv run python scripts/seed.py
    ```
@@ -96,7 +105,7 @@ The sample values above are safe defaults for local development. Replace the pla
      docker compose exec -e SEED_MEDIA_DIR=/app/scripts/seed_media backend uv run python scripts/seed.py
      ```
 
-4. **Stop the stack**
+5. **Stop the stack**
    ```bash
    docker compose down
    ```
@@ -119,6 +128,16 @@ docker compose exec backend uv run python scripts/prune_dismissed_notifications.
 ## Runtime Model
 
 This project is Docker-only. Run backend and frontend through `docker compose`; direct host execution with `npm`, `uv`, or `python` is not a supported workflow.
+
+For portfolio demos reachable from the internet, use the default `docker-compose.yml` mode and keep infra services private.
+
+## Demo Guardrails
+
+Before exposing the app publicly (even as a demo), ensure:
+- `SECRET_KEY` and `NEXTAUTH_SECRET` are unique non-default values.
+- MinIO root credentials are non-default.
+- You run behind HTTPS/TLS at the edge (reverse proxy or tunnel).
+- You do not publish Postgres/Redis/MinIO ports on the host.
 
 ---
 

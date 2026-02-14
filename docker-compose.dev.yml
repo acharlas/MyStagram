@@ -1,0 +1,31 @@
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  minio:
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  backend:
+    environment:
+      UVICORN_RELOAD: "true"
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    command: ["npm", "run", "dev"]
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - frontend-next:/app/.next
+
+volumes:
+  frontend-next:
