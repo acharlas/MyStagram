@@ -57,15 +57,17 @@ export function CommentForm({ postId }: CommentFormProps) {
         value={value}
         onChange={(event) => setValue(event.target.value)}
         placeholder="Écrire un commentaire…"
-        className="ui-surface-input rounded-lg border ui-border px-3 py-2 text-sm text-zinc-100 placeholder:text-[color:var(--ui-text-subtle)] focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+        className="ui-focus-ring ui-surface-input ui-text-strong rounded-lg border ui-border px-3 py-2 text-sm placeholder:text-[color:var(--ui-text-subtle)] focus:outline-none"
         disabled={isPending}
         autoComplete="off"
       />
-      {error ? <p className="text-xs text-red-400">{error}</p> : null}
+      {error ? (
+        <p className="ui-error-surface rounded-lg px-3 py-2 text-xs">{error}</p>
+      ) : null}
       <button
         type="submit"
         disabled={isPending}
-        className="self-end rounded-lg bg-sky-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+        className="ui-focus-ring ui-accent-button self-end rounded-lg px-3 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
       >
         Publier
       </button>

@@ -78,7 +78,7 @@ export function LikeButton({
         onClick={toggle}
         disabled={isPending}
         aria-pressed={liked}
-        className="rounded-full p-2 transition hover:bg-[color:var(--ui-surface-muted)] hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/70 disabled:opacity-50"
+        className="ui-focus-ring rounded-full p-2 transition hover:bg-[color:var(--ui-surface-muted)] hover:text-[color:var(--ui-text-strong)] focus:outline-none disabled:opacity-50"
         aria-label={liked ? "Retirer le like" : "Aimer la publication"}
       >
         <HeartIcon filled={liked} />

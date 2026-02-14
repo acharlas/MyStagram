@@ -31,7 +31,7 @@ export function CharacterCountField({
   };
 
   const inputClassName =
-    "ui-surface-input w-full rounded-xl border ui-border px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/70";
+    "ui-focus-ring ui-surface-input ui-text-strong w-full rounded-xl border ui-border px-3 py-2 text-sm focus:outline-none";
 
   const commonProps = {
     id,

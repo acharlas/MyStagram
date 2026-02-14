@@ -58,14 +58,16 @@ export default async function PostDetailPage({ params }: PostPageProps) {
           {authorUsername ? (
             <Link
               href={`/users/${encodeURIComponent(authorUsername)}`}
-              className="text-sm font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
+              className="ui-focus-ring ui-text-strong text-sm font-semibold transition hover:text-[color:var(--ui-nav-icon-active)] focus:outline-none"
             >
               {authorLabel}
             </Link>
           ) : (
-            <p className="text-sm font-semibold text-zinc-100">{authorLabel}</p>
+            <p className="ui-text-strong text-sm font-semibold">
+              {authorLabel}
+            </p>
           )}
-          <p className="mt-2 text-sm leading-relaxed text-zinc-200">
+          <p className="ui-text-muted mt-2 text-sm leading-relaxed">
             {safeCaption || "Aucune légende"}
           </p>
         </header>
@@ -87,17 +89,17 @@ export default async function PostDetailPage({ params }: PostPageProps) {
                 return (
                   <li
                     key={comment.id}
-                    className="ui-surface-input rounded-xl border ui-border px-3 py-2 text-sm text-zinc-200"
+                    className="ui-surface-input ui-text-muted rounded-xl border ui-border px-3 py-2 text-sm"
                   >
                     {commentAuthorUsername ? (
                       <Link
                         href={`/users/${encodeURIComponent(commentAuthorUsername)}`}
-                        className="font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
+                        className="ui-focus-ring ui-text-strong font-semibold transition hover:text-[color:var(--ui-nav-icon-active)] focus:outline-none"
                       >
                         {commentAuthorLabel}
                       </Link>
                     ) : (
-                      <span className="font-semibold text-zinc-100">
+                      <span className="ui-text-strong font-semibold">
                         {commentAuthorLabel}
                       </span>
                     )}
@@ -117,7 +119,7 @@ export default async function PostDetailPage({ params }: PostPageProps) {
               initialLiked={post.viewer_has_liked}
               initialCount={post.like_count}
             />
-            <span className="ui-surface-input inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-xs font-medium text-zinc-300">
+            <span className="ui-surface-input ui-nav-icon inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-xs font-medium">
               <CommentIcon className="h-4 w-4" />
               {comments.length}
             </span>

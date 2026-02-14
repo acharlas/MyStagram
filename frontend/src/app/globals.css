@@ -1,35 +1,36 @@
 @import "tailwindcss";
 
 :root {
-  --background: #060d1b;
-  --foreground: #e6edf8;
-  --accent: #38bdf8;
-  --ui-surface-nav: linear-gradient(
-    155deg,
-    rgb(10 19 37 / 96%) 0%,
-    rgb(6 13 27 / 92%) 100%
-  );
-  --ui-surface-card: linear-gradient(
-    180deg,
-    rgb(28 48 82 / 78%) 0%,
-    rgb(18 33 58 / 72%) 100%
-  );
-  --ui-surface-card-strong: linear-gradient(
-    180deg,
-    rgb(41 72 118 / 92%) 0%,
-    rgb(28 50 84 / 88%) 100%
-  );
-  --ui-surface-input: linear-gradient(
-    180deg,
-    rgb(9 19 37 / 95%) 0%,
-    rgb(6 13 27 / 91%) 100%
-  );
-  --ui-surface-muted: rgb(84 120 176 / 28%);
+  --background: #0c1119;
+  --foreground: #eef3fa;
+  --accent: #4fa3ff;
+  --ui-accent: #4fa3ff;
+  --ui-accent-hover: #74b8ff;
+  --ui-accent-soft: rgb(79 163 255 / 16%);
+  --ui-accent-text: #ddecff;
+  --ui-focus-ring: rgb(132 191 255 / 72%);
+  --ui-success-soft: rgb(63 207 142 / 22%);
+  --ui-success-text: #d7ffeb;
+  --ui-warning-text: #ffe9c6;
+  --ui-danger: #e06b7e;
+  --ui-danger-soft: rgb(224 107 126 / 22%);
+  --ui-danger-text: #ffd7df;
+  --ui-danger-border: rgb(224 107 126 / 50%);
+  --ui-selection-bg: rgb(79 163 255 / 32%);
+  --ui-selection-text: #f5f9ff;
+  --ui-text-strong: #f5f9ff;
+  --ui-nav-icon: #96a8c2;
+  --ui-nav-icon-active: #deebff;
+  --ui-surface-nav: rgb(17 22 31 / 96%);
+  --ui-surface-card: rgb(27 34 46 / 80%);
+  --ui-surface-card-strong: rgb(34 42 56 / 90%);
+  --ui-surface-input: rgb(15 20 29 / 95%);
+  --ui-surface-muted: rgb(119 136 164 / 20%);
   --ui-surface-overlay: rgb(4 9 18 / 62%);
-  --ui-border: rgb(148 163 184 / 30%);
-  --ui-border-strong: rgb(191 219 254 / 50%);
-  --ui-text-muted: #c6d6ef;
-  --ui-text-subtle: #acbfdf;
+  --ui-border: rgb(148 163 184 / 26%);
+  --ui-border-strong: rgb(191 219 254 / 44%);
+  --ui-text-muted: #c5d1e3;
+  --ui-text-subtle: #9caec7;
 }
 
 @theme inline {
@@ -52,22 +53,17 @@ body {
   margin: 0;
   background:
     radial-gradient(
-      80rem 50rem at 12% -10%,
-      rgb(14 165 233 / 24%),
+      72rem 42rem at 10% -12%,
+      rgb(79 163 255 / 12%),
       transparent 65%
-    ),
-    radial-gradient(
-      70rem 40rem at 110% 110%,
-      rgb(59 130 246 / 14%),
-      transparent 65%
-    ), linear-gradient(180deg, #060b16 0%, #091023 100%);
+    ), linear-gradient(180deg, #0c121c 0%, #101824 100%);
   color: var(--foreground);
   font-family: var(--font-sora), "Avenir Next", "Segoe UI", sans-serif;
 }
 
 ::selection {
-  background: rgb(56 189 248 / 35%);
-  color: #e2e8f0;
+  background: var(--ui-selection-bg);
+  color: var(--ui-selection-text);
 }
 
 .ui-surface-nav {
@@ -107,6 +103,10 @@ body {
   color: var(--ui-text-subtle);
 }
 
+.ui-text-strong {
+  color: var(--ui-text-strong);
+}
+
 .ui-hover-surface {
   transition-property: color, background-color, border-color;
   transition-duration: 200ms;
@@ -118,4 +118,54 @@ body {
 
 .ui-hover-surface:focus-visible {
   background-color: var(--ui-surface-muted);
+}
+
+.ui-focus-ring:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1px rgb(12 17 25 / 80%),
+    0 0 0 3px var(--ui-focus-ring);
+}
+
+.ui-accent-button {
+  border-color: transparent;
+  background-color: var(--ui-accent);
+  color: #fff;
+  transition: background-color 200ms ease;
+}
+
+.ui-accent-button:hover {
+  background-color: var(--ui-accent-hover);
+}
+
+.ui-accent-soft {
+  background-color: var(--ui-accent-soft);
+  color: var(--ui-accent-text);
+}
+
+.ui-danger-badge {
+  background-color: var(--ui-danger);
+  color: #fff;
+}
+
+.ui-success-text {
+  color: var(--ui-success-text);
+}
+
+.ui-warning-text {
+  color: var(--ui-warning-text);
+}
+
+.ui-error-surface {
+  border: 1px solid var(--ui-danger-border);
+  background-color: var(--ui-danger-soft);
+  color: var(--ui-danger-text);
+}
+
+.ui-nav-icon {
+  color: var(--ui-nav-icon);
+}
+
+.ui-nav-icon-active {
+  color: var(--ui-nav-icon-active);
 }

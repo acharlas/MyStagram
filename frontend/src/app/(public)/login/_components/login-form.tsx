@@ -70,7 +70,7 @@ export function LoginForm() {
               type="text"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
-              className="ui-surface-input w-full rounded-xl border ui-border px-3 py-2.5 text-sm text-zinc-100 placeholder:text-[color:var(--ui-text-subtle)] focus:border-sky-500/70 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+              className="ui-surface-input ui-text-strong w-full rounded-xl border ui-border px-3 py-2.5 text-sm placeholder:text-[color:var(--ui-text-subtle)] focus:border-[color:var(--ui-accent)] focus:outline-none focus:ring-2 focus:ring-[color:var(--ui-focus-ring)]"
               placeholder="Votre identifiant"
               autoComplete="username"
               required
@@ -90,7 +90,7 @@ export function LoginForm() {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="ui-surface-input w-full rounded-xl border ui-border px-3 py-2.5 text-sm text-zinc-100 placeholder:text-[color:var(--ui-text-subtle)] focus:border-sky-500/70 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+              className="ui-surface-input ui-text-strong w-full rounded-xl border ui-border px-3 py-2.5 text-sm placeholder:text-[color:var(--ui-text-subtle)] focus:border-[color:var(--ui-accent)] focus:outline-none focus:ring-2 focus:ring-[color:var(--ui-focus-ring)]"
               placeholder="Votre mot de passe"
               autoComplete="current-password"
               required
@@ -99,7 +99,7 @@ export function LoginForm() {
         </div>
 
         {error ? (
-          <p className="rounded-xl border border-red-800/60 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+          <p className="ui-error-surface rounded-xl px-3 py-2 text-sm">
             {error}
           </p>
         ) : null}
@@ -107,7 +107,7 @@ export function LoginForm() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full rounded-full bg-sky-600 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="ui-accent-button w-full rounded-full py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isSubmitting ? "Connexion..." : "Se connecter"}
         </button>
@@ -117,7 +117,7 @@ export function LoginForm() {
           <button
             type="button"
             onClick={() => router.push("/register")}
-            className="ui-surface-input rounded-full border ui-border px-4 py-2 text-sm font-semibold text-zinc-200 transition hover:border-[color:var(--ui-border-strong)] hover:bg-[color:var(--ui-surface-muted)]"
+            className="ui-focus-ring ui-surface-input ui-text-strong rounded-full border ui-border px-4 py-2 text-sm font-semibold transition hover:border-[color:var(--ui-border-strong)] hover:bg-[color:var(--ui-surface-muted)]"
           >
             Créer un compte
           </button>

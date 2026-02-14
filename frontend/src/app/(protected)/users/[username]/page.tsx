@@ -78,13 +78,13 @@ export default async function UserProfilePage({
                   className="h-full w-full object-cover"
                 />
               ) : (
-                <AvatarFallback className="ui-surface-input flex h-full w-full items-center justify-center text-2xl font-semibold text-zinc-100">
+                <AvatarFallback className="ui-surface-input ui-text-strong flex h-full w-full items-center justify-center text-2xl font-semibold">
                   {initials}
                 </AvatarFallback>
               )}
             </Avatar>
             <div className="space-y-2">
-              <h1 className="text-2xl font-semibold tracking-tight text-zinc-100 sm:text-3xl">
+              <h1 className="ui-text-strong text-2xl font-semibold tracking-tight sm:text-3xl">
                 @{profile.username}
               </h1>
               {profile.name ? (
@@ -112,7 +112,7 @@ export default async function UserProfilePage({
           {isOwnProfile ? (
             <Link
               href="/settings"
-              className="ui-surface-input inline-flex h-10 w-10 items-center justify-center self-center rounded-full border ui-border text-zinc-200 transition hover:border-sky-500/60 hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)] sm:self-start"
+              className="ui-focus-ring ui-surface-input ui-text-muted inline-flex h-10 w-10 items-center justify-center self-center rounded-full border ui-border transition hover:border-[color:var(--ui-border-strong)] hover:text-[color:var(--ui-text-strong)] focus:outline-none sm:self-start"
               aria-label="Ouvrir les paramètres du profil"
               title="Paramètres"
             >
@@ -137,7 +137,7 @@ export default async function UserProfilePage({
               <Link
                 key={post.id}
                 href={`/posts/${post.id}`}
-                className="ui-surface-input group relative block aspect-square overflow-hidden rounded-2xl border ui-border focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
+                className="ui-focus-ring ui-surface-input group relative block aspect-square overflow-hidden rounded-2xl border ui-border focus:outline-none"
               >
                 <Image
                   src={imageUrl}

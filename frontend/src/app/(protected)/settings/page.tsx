@@ -97,7 +97,7 @@ export default async function SettingsPage({
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-6 py-2">
       <header className="ui-surface-card rounded-3xl border ui-border px-5 py-4 backdrop-blur sm:px-6">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">
+        <h1 className="ui-text-strong text-2xl font-semibold tracking-tight">
           Paramètres du profil
         </h1>
         <p className="ui-text-muted mt-1 text-sm">
@@ -108,7 +108,7 @@ export default async function SettingsPage({
       {errorMessage ? (
         <p
           role="alert"
-          className="rounded-2xl border border-red-500/40 bg-red-950/40 px-4 py-3 text-sm text-red-200"
+          className="ui-error-surface rounded-2xl px-4 py-3 text-sm"
         >
           {errorMessage}
         </p>
@@ -154,7 +154,7 @@ export default async function SettingsPage({
                   className="h-full w-full object-cover"
                 />
               ) : (
-                <AvatarFallback className="ui-surface-input text-zinc-100">
+                <AvatarFallback className="ui-surface-input ui-text-strong">
                   {initials || displayName.slice(0, 2).toUpperCase()}
                 </AvatarFallback>
               )}
@@ -165,7 +165,7 @@ export default async function SettingsPage({
                 name="avatar"
                 type="file"
                 accept={acceptedAvatarTypes}
-                className="ui-surface-input w-full cursor-pointer rounded-xl border border-dashed ui-border px-3 py-2 text-sm text-zinc-200 file:mr-3 file:rounded-md file:border-0 file:bg-[color:var(--ui-surface-muted)] file:px-3 file:py-1 file:text-sm file:font-medium file:text-zinc-100 hover:border-[color:var(--ui-border-strong)] focus:outline-none focus:ring-2 focus:ring-sky-500/70"
+                className="ui-focus-ring ui-surface-input ui-text-muted w-full cursor-pointer rounded-xl border border-dashed ui-border px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[color:var(--ui-surface-muted)] file:px-3 file:py-1 file:text-sm file:font-medium file:text-[color:var(--ui-text-strong)] hover:border-[color:var(--ui-border-strong)] focus:outline-none"
               />
               <p className="ui-text-subtle text-xs">
                 Types: {acceptedAvatarTypes} - Taille max: {maxAvatarSizeMb} Mo
@@ -195,7 +195,7 @@ export default async function SettingsPage({
         <div className="flex justify-end">
           <button
             type="submit"
-            className="rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500"
+            className="ui-focus-ring ui-accent-button rounded-full px-4 py-2 text-sm font-semibold"
           >
             Enregistrer
           </button>

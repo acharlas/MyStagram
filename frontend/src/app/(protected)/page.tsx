@@ -47,19 +47,19 @@ function PostCard({ post }: { post: FeedPost }) {
   return (
     <article className="ui-surface-card group rounded-3xl border ui-border p-4 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] backdrop-blur sm:p-5">
       <header className="flex items-center gap-3">
-        <div className="ui-surface-muted flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold text-zinc-200 ring-1 ring-[color:var(--ui-border)]">
+        <div className="ui-surface-muted ui-text-muted flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ring-1 ring-[color:var(--ui-border)]">
           {initials || displayName.slice(0, 2).toUpperCase()}
         </div>
         <div className="min-w-0 text-sm">
           {authorUsername ? (
             <Link
               href={`/users/${encodeURIComponent(authorUsername)}`}
-              className="truncate font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
+              className="ui-focus-ring ui-text-strong truncate font-semibold transition hover:text-[color:var(--ui-nav-icon-active)] focus:outline-none"
             >
               {displayName}
             </Link>
           ) : (
-            <p className="truncate font-semibold text-zinc-100">
+            <p className="ui-text-strong truncate font-semibold">
               {displayName}
             </p>
           )}
@@ -71,7 +71,7 @@ function PostCard({ post }: { post: FeedPost }) {
 
       <Link
         href={`/posts/${post.id}`}
-        className="mt-4 block overflow-hidden rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
+        className="ui-focus-ring mt-4 block overflow-hidden rounded-2xl focus:outline-none"
       >
         <div className="ui-surface-input relative aspect-square w-full overflow-hidden rounded-2xl">
           <Image
@@ -85,7 +85,7 @@ function PostCard({ post }: { post: FeedPost }) {
       </Link>
 
       {safeCaption ? (
-        <p className="mt-3 text-sm leading-relaxed text-zinc-200">
+        <p className="ui-text-muted mt-3 text-sm leading-relaxed">
           {safeCaption}
         </p>
       ) : (
@@ -100,7 +100,7 @@ function PostCard({ post }: { post: FeedPost }) {
         />
         <Link
           href={`/posts/${post.id}`}
-          className="inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-sm text-zinc-300 transition hover:bg-[color:var(--ui-surface-muted)] hover:text-zinc-100"
+          className="ui-focus-ring ui-nav-icon inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-sm transition hover:bg-[color:var(--ui-surface-muted)] hover:text-[color:var(--ui-nav-icon-active)]"
           aria-label="Voir les commentaires"
         >
           <CommentIcon className="h-4 w-4" />
@@ -126,7 +126,7 @@ export default async function ProtectedHomePage() {
           <p>Le fil d&apos;actualité est vide pour le moment.</p>
           <Link
             href="/posts/new"
-            className="mt-4 inline-flex rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500"
+            className="ui-focus-ring ui-accent-button mt-4 inline-flex rounded-full px-4 py-2 text-sm font-semibold"
           >
             Publier une photo
           </Link>
