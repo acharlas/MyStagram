@@ -285,6 +285,7 @@ describe("getSessionServer", () => {
     });
     const getJwtToken = vi.fn().mockResolvedValue({
       accessToken: "server-access-token",
+      accessTokenExpires: Date.now() + 60_000,
     });
     const readCookies = vi.fn().mockResolvedValue({
       getAll: () => [
@@ -302,11 +303,196 @@ describe("getSessionServer", () => {
 
     expect(getJwtToken).toHaveBeenCalledWith(
       expect.objectContaining({
+        req: expect.objectContaining({
+          cookies: expect.objectContaining({
+            "next-auth.session-token": "cookie-value",
+          }),
+        }),
         secret: "test-secret",
       }),
     );
     expect(result).toMatchObject({
       accessToken: "server-access-token",
+    });
+  });
+
+  it("does not hydrate expired access token from JWT cookie", async () => {
+    const getter = vi.fn().mockResolvedValue({
+      user: {
+        id: "user-id",
+        username: "string",
+        avatarUrl: null,
+      },
+      expires: "2099-01-01T00:00:00.000Z",
+    });
+    const getJwtToken = vi.fn().mockResolvedValue({
+      accessToken: "server-access-token",
+      accessTokenExpires: Date.now() - 1_000,
+    });
+    const readCookies = vi.fn().mockResolvedValue({
+      getAll: () => [
+        { name: "next-auth.session-token", value: "cookie-value" },
+      ],
+    });
+
+    const result = await getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+      },
+    );
+
+    expect(result).not.toBeNull();
+    expect((result as { accessToken?: string }).accessToken).toBeUndefined();
+  });
+
+  it("refreshes access token for recoverable JWT cookie", async () => {
+    const getter = vi.fn().mockResolvedValue({
+      user: {
+        id: "user-id",
+        username: "string",
+        avatarUrl: null,
+      },
+      expires: "2099-01-01T00:00:00.000Z",
+    });
+    const getJwtToken = vi.fn().mockResolvedValue({
+      accessToken: "server-access-token",
+      accessTokenExpires: Date.now() - 1_000,
+      refreshToken: "refresh-token",
+      error: undefined,
+    });
+    const readCookies = vi.fn().mockResolvedValue({
+      getAll: () => [
+        { name: "next-auth.session-token", value: "cookie-value" },
+      ],
+    });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: "refreshed-access-token",
+      }),
+    });
+
+    const result = await getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      },
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://backend:8000/api/v1/auth/refresh",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Cookie: "refresh_token=refresh-token",
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      accessToken: "refreshed-access-token",
+    });
+  });
+
+  it("does not hydrate access token when refresh attempt fails", async () => {
+    const getter = vi.fn().mockResolvedValue({
+      user: {
+        id: "user-id",
+        username: "string",
+        avatarUrl: null,
+      },
+      expires: "2099-01-01T00:00:00.000Z",
+    });
+    const getJwtToken = vi.fn().mockResolvedValue({
+      accessToken: "server-access-token",
+      accessTokenExpires: Date.now() - 1_000,
+      refreshToken: "refresh-token",
+      error: undefined,
+    });
+    const readCookies = vi.fn().mockResolvedValue({
+      getAll: () => [
+        { name: "next-auth.session-token", value: "cookie-value" },
+      ],
+    });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        detail: "Refresh failed",
+      }),
+    });
+
+    const result = await getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      },
+    );
+
+    expect(result).not.toBeNull();
+    expect((result as { accessToken?: string }).accessToken).toBeUndefined();
+  });
+
+  it("deduplicates concurrent refresh attempts for the same recoverable token", async () => {
+    const getter = vi.fn().mockResolvedValue({
+      user: {
+        id: "user-id",
+        username: "string",
+        avatarUrl: null,
+      },
+      expires: "2099-01-01T00:00:00.000Z",
+    });
+    const getJwtToken = vi.fn().mockResolvedValue({
+      accessToken: "expired-access-token",
+      accessTokenExpires: Date.now() - 1_000,
+      refreshToken: "refresh-token",
+      error: undefined,
+    });
+    const readCookies = vi.fn().mockResolvedValue({
+      getAll: () => [
+        { name: "next-auth.session-token", value: "cookie-value" },
+      ],
+    });
+    const fetchImpl = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return {
+        ok: true,
+        json: async () => ({
+          access_token: "refreshed-access-token",
+        }),
+      };
+    });
+
+    const first = getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      },
+    );
+    const second = getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      },
+    );
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(firstResult).toMatchObject({
+      accessToken: "refreshed-access-token",
+    });
+    expect(secondResult).toMatchObject({
+      accessToken: "refreshed-access-token",
     });
   });
 });

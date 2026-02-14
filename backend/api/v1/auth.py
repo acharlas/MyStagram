@@ -417,15 +417,11 @@ async def refresh_tokens(
             detail="Invalid refresh token",
         )
 
-    now = datetime.now(timezone.utc)
-    token_obj.revoked_at = now
     access_token = create_access_token(str(user_id))
-    new_refresh_token = create_refresh_token(str(user_id))
-    await _store_refresh_token(session, user_id, new_refresh_token)
-    await session.commit()
-
-    _set_token_cookies(response, access_token, new_refresh_token)
-    return TokenResponse(access_token=access_token, refresh_token=new_refresh_token)
+    # Keep refresh tokens stable for session continuity with stateless frontend JWT.
+    # Rotation requires cookie re-encryption on every server-side refresh path.
+    _set_token_cookies(response, access_token, refresh_token)
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)

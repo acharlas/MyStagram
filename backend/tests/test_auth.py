@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from models import RefreshToken, User
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], column == value)
+
 
 def build_payload() -> dict[str, str | None]:
     suffix = uuid4().hex[:8]
@@ -279,7 +281,7 @@ async def test_login_email_alias_still_authenticates_displaced_account(
 
 
 @pytest.mark.asyncio
-async def test_refresh_rotates_refresh_token(async_client, db_session: AsyncSession):
+async def test_refresh_keeps_refresh_token_active(async_client, db_session: AsyncSession):
     payload = build_payload()
     await async_client.post("/api/v1/auth/register", json=payload)
     login_response = await async_client.post(
@@ -294,25 +296,20 @@ async def test_refresh_rotates_refresh_token(async_client, db_session: AsyncSess
     refresh_response = await async_client.post("/api/v1/auth/refresh")
     assert refresh_response.status_code == 200
     refreshed_token = refresh_response.json()["refresh_token"]
-    assert refreshed_token != old_refresh
+    assert refreshed_token == old_refresh
 
-    hashed_old = hashlib.sha256(old_refresh.encode()).hexdigest()
-    old_result = await db_session.execute(
-        select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed_old))
+    hashed = hashlib.sha256(refreshed_token.encode()).hexdigest()
+    stored_result = await db_session.execute(
+        select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed))
     )
-    old_stored = old_result.scalar_one()
-    assert old_stored.revoked_at is not None
-
-    hashed_new = hashlib.sha256(refreshed_token.encode()).hexdigest()
-    new_result = await db_session.execute(
-        select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed_new))
-    )
-    new_stored = new_result.scalar_one()
-    assert new_stored.revoked_at is None
+    stored_token = stored_result.scalar_one()
+    assert stored_token.revoked_at is None
 
 
 @pytest.mark.asyncio
-async def test_refresh_rejects_revoked_refresh_token(async_client):
+async def test_refresh_rejects_revoked_refresh_token(
+    async_client, db_session: AsyncSession
+):
     payload = build_payload()
     await async_client.post("/api/v1/auth/register", json=payload)
     login_response = await async_client.post(
@@ -324,12 +321,16 @@ async def test_refresh_rejects_revoked_refresh_token(async_client):
     )
     old_refresh = login_response.json()["refresh_token"]
 
-    refresh_response = await async_client.post("/api/v1/auth/refresh")
-    assert refresh_response.status_code == 200
+    hashed = hashlib.sha256(old_refresh.encode()).hexdigest()
+    token_result = await db_session.execute(
+        select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed))
+    )
+    token = token_result.scalar_one()
+    token.revoked_at = datetime.now(timezone.utc)
+    await db_session.commit()
 
-    async_client.cookies.set("refresh_token", old_refresh)
-    second_refresh = await async_client.post("/api/v1/auth/refresh")
-    assert second_refresh.status_code == 401
+    refresh_response = await async_client.post("/api/v1/auth/refresh")
+    assert refresh_response.status_code == 401
 
 
 @pytest.mark.asyncio
