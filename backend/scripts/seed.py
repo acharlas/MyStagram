@@ -39,7 +39,7 @@ if str(ROOT_DIR) not in sys.path:
 from core import settings  # noqa: E402
 from core.security import hash_password  # noqa: E402
 from db.session import AsyncSessionMaker  # noqa: E402
-from models import Follow, Post, User  # noqa: E402
+from models import Comment, Follow, Like, Post, User  # noqa: E402
 from services.storage import ensure_bucket, get_minio_client  # noqa: E402
 
 
@@ -187,6 +187,14 @@ PLACEHOLDER_COLORS: Sequence[tuple[int, int, int]] = [
     (90, 170, 120),
     (219, 121, 146),
     (132, 179, 140),
+]
+SEED_COMMENT_TEMPLATES: Sequence[str] = [
+    "Super photo!",
+    "J'adore cette ambiance.",
+    "Excellent cadrage.",
+    "Top rendu des couleurs.",
+    "Magnifique shot.",
+    "Très beau moment capturé.",
 ]
 
 
@@ -448,6 +456,80 @@ async def ensure_follows(
         session.add(Follow(follower_id=follower.id, followee_id=followee.id))
 
 
+async def ensure_engagement(
+    session,
+    users: dict[str, User],
+    follows: Sequence[tuple[str, str]],
+) -> tuple[int, int]:
+    """Seed deterministic likes/comments so notification panels have real data."""
+    user_ids = [user.id for user in users.values() if user.id is not None]
+    if not user_ids:
+        return 0, 0
+
+    post_entity = cast(Any, Post)
+    post_author_id = cast(ColumnElement[str], Post.author_id)
+    post_id_column = cast(ColumnElement[int], Post.id)
+    posts_result = await session.execute(
+        select(post_entity)
+        .where(post_author_id.in_(user_ids))
+        .order_by(post_author_id, post_id_column)
+    )
+
+    posts_by_author: dict[str, list[Post]] = {}
+    for post in posts_result.scalars().all():
+        posts_by_author.setdefault(post.author_id, []).append(post)
+
+    likes_created = 0
+    comments_created = 0
+    like_entity = cast(Any, Like)
+    comment_entity = cast(Any, Comment)
+
+    for index, (follower_username, followee_username) in enumerate(follows):
+        follower = users[follower_username]
+        followee = users[followee_username]
+
+        if follower.id is None or followee.id is None:
+            raise ValueError("Seed users missing identifiers")
+
+        followee_posts = posts_by_author.get(followee.id, [])
+        if not followee_posts:
+            continue
+
+        target_post = followee_posts[index % len(followee_posts)]
+        if target_post.id is None:
+            continue
+
+        like_exists = await session.execute(
+            select(like_entity).where(
+                _eq(Like.user_id, follower.id),
+                _eq(Like.post_id, target_post.id),
+            )
+        )
+        if like_exists.scalar_one_or_none() is None:
+            session.add(Like(user_id=follower.id, post_id=target_post.id))
+            likes_created += 1
+
+        comment_text = SEED_COMMENT_TEMPLATES[index % len(SEED_COMMENT_TEMPLATES)]
+        comment_exists = await session.execute(
+            select(comment_entity).where(
+                _eq(Comment.author_id, follower.id),
+                _eq(Comment.post_id, target_post.id),
+                _eq(Comment.text, comment_text),
+            )
+        )
+        if comment_exists.scalar_one_or_none() is None:
+            session.add(
+                Comment(
+                    author_id=follower.id,
+                    post_id=target_post.id,
+                    text=comment_text,
+                )
+            )
+            comments_created += 1
+
+    return likes_created, comments_created
+
+
 async def seed() -> None:
     plan = build_seed_plan()
     ensure_seed_post_media(plan.posts)
@@ -460,6 +542,10 @@ async def seed() -> None:
 
         await ensure_posts(session, users, plan.posts)
         await ensure_follows(session, users, plan.follows)
+        await session.flush()
+        likes_created, comments_created = await ensure_engagement(
+            session, users, plan.follows
+        )
         await session.commit()
 
     print("✅ Seed data inserted.")
@@ -467,6 +553,8 @@ async def seed() -> None:
     print("   Default password:", DEFAULT_PASSWORD)
     print("   Posts:", len(plan.posts))
     print("   Follows:", len(plan.follows))
+    print("   Likes added:", likes_created)
+    print("   Comments added:", comments_created)
     if plan.discovered_media_posts > 0:
         print(
             f"   Local media loaded: {plan.discovered_media_posts} "
