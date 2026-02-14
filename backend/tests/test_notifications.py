@@ -402,6 +402,84 @@ async def test_stream_backfills_when_newest_notifications_are_dismissed(
 
 
 @pytest.mark.asyncio
+async def test_stream_backfills_beyond_large_dismissed_window(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("window_owner")
+    commenter_payload = make_user_payload("window_commenter")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, commenter_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    commenter = await get_user_by_username(db_session, commenter_payload["username"])
+
+    base_time = datetime(2026, 2, 14, 13, 0, 0, tzinfo=timezone.utc)
+    post = Post(
+        author_id=owner.id,
+        image_key=f"posts/{owner.id}/dismissed-window.jpg",
+        caption="dismissed-window",
+        created_at=base_time,
+        updated_at=base_time,
+    )
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        raise ValueError("Post record missing identifier")
+
+    total_comments = 560
+    dismissed_comments = 540
+    for idx in range(total_comments):
+        event_time = base_time + timedelta(seconds=idx)
+        db_session.add(
+            Comment(
+                post_id=post.id,
+                author_id=commenter.id,
+                text=f"bulk-{idx}",
+                created_at=event_time,
+                updated_at=event_time,
+            )
+        )
+    await db_session.commit()
+
+    comment_id_column = cast(ColumnElement[int], Comment.id)
+    comment_created_at_column = cast(ColumnElement[datetime], Comment.created_at)
+    comments_result = await db_session.execute(
+        select(comment_id_column, comment_created_at_column)
+        .where(_eq(Comment.post_id, post.id))
+        .order_by(
+            cast(Any, Comment.created_at).desc(),
+            cast(Any, Comment.id).desc(),
+        )
+    )
+    ordered_comments = comments_result.all()
+    assert len(ordered_comments) == total_comments
+
+    for comment_id, created_at in ordered_comments[:dismissed_comments]:
+        db_session.add(
+            DismissedNotification(
+                user_id=owner.id,
+                notification_id=f"comment-{post.id}-{comment_id}",
+                dismissed_at=created_at + timedelta(seconds=1),
+            )
+        )
+    await db_session.commit()
+
+    expected_comment_id = ordered_comments[dismissed_comments][0]
+
+    await login(async_client, owner_payload)
+    stream = await async_client.get("/api/v1/notifications/stream?limit=1")
+    assert stream.status_code == 200
+    payload = stream.json()
+    assert len(payload["notifications"]) == 1
+    assert payload["notifications"][0]["id"] == f"comment-{post.id}-{expected_comment_id}"
+
+
+@pytest.mark.asyncio
 async def test_legacy_like_dismissal_id_remains_effective_for_new_like_ids(
     async_client: AsyncClient,
     db_session: AsyncSession,

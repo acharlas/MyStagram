@@ -8,9 +8,20 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import (
+    Integer,
+    String,
+    and_,
+    cast as sa_cast,
+    func,
+    literal,
+    or_,
+    select,
+    union_all,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql import ColumnElement
 
 from api.deps import get_current_user, get_db
@@ -24,7 +35,6 @@ MAX_STREAM_NOTIFICATIONS = 32
 DEFAULT_STREAM_NOTIFICATIONS = 16
 MAX_STREAM_FOLLOW_ITEMS = 32
 DEFAULT_STREAM_FOLLOW_ITEMS = 8
-MAX_STREAM_FETCH_NOTIFICATIONS = MAX_DISMISSED_NOTIFICATIONS + MAX_STREAM_NOTIFICATIONS
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -79,99 +89,280 @@ def _build_like_notification_id(post_id: int, liker_user_id: str) -> str:
     return f"like-{post_id}-{liker_user_id}"
 
 
-def _build_like_notification_legacy_id(post_id: str) -> str:
-    return f"like-{post_id}"
-
-
 def _build_follow_notification_id(follower_user_id: str) -> str:
     return f"follow-{follower_user_id}"
 
 
-def _like_post_segment_from_notification_id(notification_id: str) -> str | None:
-    prefix = "like-"
-    if not notification_id.startswith(prefix):
-        return None
-
-    rest = notification_id[len(prefix) :]
-    if not rest:
-        return None
-
-    post_segment, separator, _actor_segment = rest.partition("-")
-    if not separator:
-        # Legacy id shape: "like-<post_id>"
-        return post_segment or None
-    return post_segment or None
+def _comment_notification_id_expression(
+    post_id_column: ColumnElement[int],
+    comment_id_column: ColumnElement[int],
+) -> ColumnElement[str]:
+    return cast(
+        ColumnElement[str],
+        literal("comment-")
+        + sa_cast(cast(Any, post_id_column), String())
+        + literal("-")
+        + sa_cast(cast(Any, comment_id_column), String()),
+    )
 
 
-def _is_dismissed(
-    notification: NotificationStreamItem,
-    dismissed_at_by_id: dict[str, datetime],
-) -> bool:
-    if notification.kind == "comment":
-        dismissed_at = dismissed_at_by_id.get(notification.id)
-        if dismissed_at is None:
-            return False
-        # Comments are immutable events: once dismissed, keep them dismissed.
-        return True
-
-    dismissed_at_candidates: list[datetime] = []
-    direct_dismissed_at = dismissed_at_by_id.get(notification.id)
-    if direct_dismissed_at is not None:
-        dismissed_at_candidates.append(direct_dismissed_at)
-
-    # Backward compatibility: old clients used "like-<post_id>" ids.
-    post_segment = _like_post_segment_from_notification_id(notification.id)
-    if post_segment is not None:
-        legacy_dismissed_at = dismissed_at_by_id.get(
-            _build_like_notification_legacy_id(post_segment)
-        )
-        if legacy_dismissed_at is not None:
-            dismissed_at_candidates.append(legacy_dismissed_at)
-
-    if not dismissed_at_candidates:
-        return False
-    dismissed_at = max(dismissed_at_candidates)
-
-    # Like notifications are stateful (a user can unlike/like again). Keep them
-    # dismissed while the like event timestamp has not advanced since dismissal.
-    occurred_at = notification.occurred_at
-    if occurred_at is None:
-        return True
-    return dismissed_at >= occurred_at
+def _like_notification_id_expression(
+    post_id_column: ColumnElement[int],
+    liker_user_id_column: ColumnElement[str],
+) -> ColumnElement[str]:
+    return cast(
+        ColumnElement[str],
+        literal("like-")
+        + sa_cast(cast(Any, post_id_column), String())
+        + literal("-")
+        + sa_cast(cast(Any, liker_user_id_column), String()),
+    )
 
 
-async def _load_dismissed_notifications(
+def _legacy_like_notification_id_expression(
+    post_id_column: ColumnElement[int],
+) -> ColumnElement[str]:
+    return cast(
+        ColumnElement[str],
+        literal("like-") + sa_cast(cast(Any, post_id_column), String()),
+    )
+
+
+async def _load_notification_stream_items(
     session: AsyncSession,
     user_id: str,
     *,
     limit: int,
-) -> dict[str, datetime]:
-    notification_id_column = cast(ColumnElement[str], DismissedNotification.notification_id)
-    dismissed_at_column = cast(ColumnElement[datetime], DismissedNotification.dismissed_at)
+) -> list[NotificationStreamItem]:
+    comment_id_column = cast(ColumnElement[int], Comment.id)
+    comment_post_id_column = cast(ColumnElement[int], Comment.post_id)
+    comment_author_id_column = cast(ColumnElement[str], Comment.author_id)
+    comment_created_at_column = cast(ColumnElement[datetime], Comment.created_at)
+    comment_author_username_column = cast(ColumnElement[str | None], User.username)
+    comment_notification_id_column = _comment_notification_id_expression(
+        comment_post_id_column, comment_id_column
+    )
+    dismissed_comment = aliased(DismissedNotification)
+    dismissed_comment_id_column = cast(ColumnElement[int | None], dismissed_comment.id)
+    dismissed_comment_notification_id_column = cast(
+        ColumnElement[str], dismissed_comment.notification_id
+    )
+
+    null_user_id = literal(None, type_=String(length=36))
+    null_comment_id = literal(None, type_=Integer())
+
+    comment_events_visible = (
+        select(
+            comment_post_id_column.label("post_id"),
+            comment_id_column.label("comment_id"),
+            comment_author_username_column.label("username"),
+            comment_created_at_column.label("occurred_at"),
+        )
+        .join(Post, _eq(Post.id, Comment.post_id))
+        .join(User, _eq(User.id, Comment.author_id))
+        .outerjoin(
+            dismissed_comment,
+            and_(
+                _eq(dismissed_comment.user_id, user_id),
+                _eq(
+                    dismissed_comment_notification_id_column,
+                    comment_notification_id_column,
+                ),
+            ),
+        )
+        .where(
+            _eq(Post.author_id, user_id),
+            comment_author_id_column != user_id,
+            dismissed_comment_id_column.is_(None),
+        )
+        .order_by(
+            _desc(cast(Any, Comment.created_at)),
+            _desc(cast(Any, Comment.id)),
+        )
+        .limit(limit)
+        .subquery("comment_events_visible")
+    )
+    comment_events = select(
+        literal("comment").label("kind"),
+        cast(ColumnElement[int], comment_events_visible.c.post_id).label("post_id"),
+        cast(ColumnElement[int], comment_events_visible.c.comment_id).label(
+            "comment_id"
+        ),
+        null_user_id.label("liker_user_id"),
+        cast(ColumnElement[str | None], comment_events_visible.c.username).label(
+            "username"
+        ),
+        cast(
+            ColumnElement[datetime | None], comment_events_visible.c.occurred_at
+        ).label("occurred_at"),
+    )
+
+    like_post_id_column = cast(ColumnElement[int], Like.post_id)
+    like_user_id_column = cast(ColumnElement[str], Like.user_id)
+    like_created_at_column = cast(ColumnElement[datetime], Like.created_at)
+    like_updated_at_column = cast(ColumnElement[datetime], Like.updated_at)
+    like_username_column = cast(ColumnElement[str | None], User.username)
+    like_event_time_column = cast(
+        ColumnElement[datetime],
+        func.coalesce(like_updated_at_column, like_created_at_column),
+    )
+    like_notification_id_column = _like_notification_id_expression(
+        like_post_id_column, like_user_id_column
+    )
+    legacy_like_notification_id_column = _legacy_like_notification_id_expression(
+        like_post_id_column
+    )
+    dismissed_like_exact = aliased(DismissedNotification)
+    dismissed_like_legacy = aliased(DismissedNotification)
+    dismissed_like_exact_notification_id_column = cast(
+        ColumnElement[str], dismissed_like_exact.notification_id
+    )
+    dismissed_like_legacy_notification_id_column = cast(
+        ColumnElement[str], dismissed_like_legacy.notification_id
+    )
+    dismissed_like_exact_at_column = cast(
+        ColumnElement[datetime | None], dismissed_like_exact.dismissed_at
+    )
+    dismissed_like_legacy_at_column = cast(
+        ColumnElement[datetime | None], dismissed_like_legacy.dismissed_at
+    )
+
+    like_events_visible = (
+        select(
+            like_post_id_column.label("post_id"),
+            like_user_id_column.label("liker_user_id"),
+            like_username_column.label("username"),
+            like_event_time_column.label("occurred_at"),
+        )
+        .join(Post, _eq(Post.id, Like.post_id))
+        .join(User, _eq(User.id, Like.user_id))
+        .outerjoin(
+            dismissed_like_exact,
+            and_(
+                _eq(dismissed_like_exact.user_id, user_id),
+                _eq(
+                    dismissed_like_exact_notification_id_column,
+                    like_notification_id_column,
+                ),
+            ),
+        )
+        .outerjoin(
+            dismissed_like_legacy,
+            and_(
+                _eq(dismissed_like_legacy.user_id, user_id),
+                _eq(
+                    dismissed_like_legacy_notification_id_column,
+                    legacy_like_notification_id_column,
+                ),
+            ),
+        )
+        .where(
+            _eq(Post.author_id, user_id),
+            like_user_id_column != user_id,
+            or_(
+                dismissed_like_exact_at_column.is_(None),
+                dismissed_like_exact_at_column < like_event_time_column,
+            ),
+            or_(
+                dismissed_like_legacy_at_column.is_(None),
+                dismissed_like_legacy_at_column < like_event_time_column,
+            ),
+        )
+        .order_by(
+            _desc(cast(Any, Like.updated_at)),
+            _desc(cast(Any, Like.post_id)),
+        )
+        .limit(limit)
+        .subquery("like_events_visible")
+    )
+    like_events = select(
+        literal("like").label("kind"),
+        cast(ColumnElement[int], like_events_visible.c.post_id).label("post_id"),
+        null_comment_id.label("comment_id"),
+        cast(ColumnElement[str], like_events_visible.c.liker_user_id).label(
+            "liker_user_id"
+        ),
+        cast(ColumnElement[str | None], like_events_visible.c.username).label(
+            "username"
+        ),
+        cast(
+            ColumnElement[datetime | None], like_events_visible.c.occurred_at
+        ).label("occurred_at"),
+    )
+
+    notification_events = union_all(comment_events, like_events).subquery(
+        "notification_events"
+    )
+    event_kind_column = cast(ColumnElement[str], notification_events.c.kind)
+    event_post_id_column = cast(ColumnElement[int], notification_events.c.post_id)
+    event_comment_id_column = cast(
+        ColumnElement[int | None], notification_events.c.comment_id
+    )
+    event_liker_user_id_column = cast(
+        ColumnElement[str | None], notification_events.c.liker_user_id
+    )
+    event_username_column = cast(
+        ColumnElement[str | None], notification_events.c.username
+    )
+    event_occurred_at_column = cast(
+        ColumnElement[datetime | None], notification_events.c.occurred_at
+    )
+
     result = await session.execute(
-        select(notification_id_column, dismissed_at_column)
-        .where(_eq(DismissedNotification.user_id, user_id))
-        .order_by(_desc(cast(Any, DismissedNotification.dismissed_at)))
+        select(
+            event_kind_column,
+            event_post_id_column,
+            event_comment_id_column,
+            event_liker_user_id_column,
+            event_username_column,
+            event_occurred_at_column,
+        )
+        .order_by(
+            _desc(cast(Any, event_occurred_at_column)),
+            _desc(cast(Any, event_post_id_column)),
+            _desc(cast(Any, event_comment_id_column)),
+            _desc(cast(Any, event_liker_user_id_column)),
+        )
         .limit(limit)
     )
-    dismissed_at_by_id: dict[str, datetime] = {}
-    for notification_id, dismissed_at in result.all():
-        dismissed_at_by_id[notification_id] = dismissed_at
-    return dismissed_at_by_id
 
+    notifications: list[NotificationStreamItem] = []
+    for (
+        kind,
+        post_id,
+        comment_id,
+        liker_user_id,
+        username,
+        occurred_at,
+    ) in result.all():
+        if kind == "comment":
+            if comment_id is None:
+                continue
+            notifications.append(
+                NotificationStreamItem(
+                    id=_build_comment_notification_id(post_id, comment_id),
+                    kind="comment",
+                    username=username,
+                    message="a commente votre publication",
+                    href=f"/posts/{post_id}",
+                    occurred_at=occurred_at,
+                )
+            )
+            continue
 
-def _stream_fetch_budget(limit: int, dismissed_count: int) -> int:
-    # Overfetch enough rows to backfill after dismissal filtering, while keeping
-    # an upper bound on database work.
-    target = max(limit + dismissed_count, limit)
-    return min(target, MAX_STREAM_FETCH_NOTIFICATIONS)
-
-
-def _occurred_at_sort_key(item: NotificationStreamItem) -> float:
-    occurred_at = item.occurred_at
-    if occurred_at is None:
-        return 0.0
-    return occurred_at.timestamp()
+        if liker_user_id is None:
+            continue
+        notifications.append(
+            NotificationStreamItem(
+                id=_build_like_notification_id(post_id, liker_user_id),
+                kind="like",
+                username=username,
+                message="a aime votre publication",
+                href=f"/posts/{post_id}",
+                occurred_at=occurred_at,
+            )
+        )
+    return notifications
 
 
 @router.get("/dismissed", response_model=DismissedNotificationListResponse)
@@ -213,97 +404,11 @@ async def get_notification_stream(
             detail="User record missing identifier",
         )
 
-    dismissed_at_by_id = await _load_dismissed_notifications(
+    visible_notifications = await _load_notification_stream_items(
         session,
         user_id,
-        limit=MAX_DISMISSED_NOTIFICATIONS,
+        limit=limit,
     )
-    notification_fetch_budget = _stream_fetch_budget(limit, len(dismissed_at_by_id))
-
-    comment_id_column = cast(ColumnElement[int], Comment.id)
-    comment_post_id_column = cast(ColumnElement[int], Comment.post_id)
-    comment_author_id_column = cast(ColumnElement[str], Comment.author_id)
-    comment_created_at_column = cast(ColumnElement[datetime], Comment.created_at)
-    comment_author_username_column = cast(ColumnElement[str | None], User.username)
-    comment_result = await session.execute(
-        select(
-            comment_id_column,
-            comment_post_id_column,
-            comment_created_at_column,
-            comment_author_username_column,
-        )
-        .join(Post, _eq(Post.id, Comment.post_id))
-        .join(User, _eq(User.id, Comment.author_id))
-        .where(
-            _eq(Post.author_id, user_id),
-            comment_author_id_column != user_id,
-        )
-        .order_by(
-            _desc(cast(Any, Comment.created_at)),
-            _desc(cast(Any, Comment.id)),
-        )
-        .limit(notification_fetch_budget)
-    )
-    comment_notifications: list[NotificationStreamItem] = []
-    for comment_id, post_id, created_at, username in comment_result.all():
-        comment_notifications.append(
-            NotificationStreamItem(
-                id=_build_comment_notification_id(post_id, comment_id),
-                kind="comment",
-                username=username,
-                message="a commente votre publication",
-                href=f"/posts/{post_id}",
-                occurred_at=created_at,
-            )
-        )
-
-    like_post_id_column = cast(ColumnElement[int], Like.post_id)
-    like_user_id_column = cast(ColumnElement[str], Like.user_id)
-    like_created_at_column = cast(ColumnElement[datetime], Like.created_at)
-    like_updated_at_column = cast(ColumnElement[datetime], Like.updated_at)
-    like_username_column = cast(ColumnElement[str | None], User.username)
-    like_result = await session.execute(
-        select(
-            like_post_id_column,
-            like_user_id_column,
-            like_created_at_column,
-            like_updated_at_column,
-            like_username_column,
-        )
-        .join(Post, _eq(Post.id, Like.post_id))
-        .join(User, _eq(User.id, Like.user_id))
-        .where(
-            _eq(Post.author_id, user_id),
-            like_user_id_column != user_id,
-        )
-        .order_by(
-            _desc(cast(Any, Like.updated_at)),
-            _desc(cast(Any, Like.post_id)),
-        )
-        .limit(notification_fetch_budget)
-    )
-    like_notifications: list[NotificationStreamItem] = []
-    for post_id, liker_user_id, created_at, updated_at, username in like_result.all():
-        event_time = updated_at or created_at
-        like_notifications.append(
-            NotificationStreamItem(
-                id=_build_like_notification_id(post_id, liker_user_id),
-                kind="like",
-                username=username,
-                message="a aime votre publication",
-                href=f"/posts/{post_id}",
-                occurred_at=event_time,
-            )
-        )
-
-    notifications = sorted(
-        [*comment_notifications, *like_notifications],
-        key=_occurred_at_sort_key,
-        reverse=True,
-    )
-    visible_notifications = [
-        item for item in notifications if not _is_dismissed(item, dismissed_at_by_id)
-    ][:limit]
 
     follow_follower_id_column = cast(ColumnElement[str], Follow.follower_id)
     follow_created_at_column = cast(ColumnElement[datetime], Follow.created_at)
