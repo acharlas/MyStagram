@@ -10,7 +10,7 @@ vi.mock("../../lib/api/client", async () => {
   };
 });
 
-import { apiServerFetch } from "../../lib/api/client";
+import { ApiError, apiServerFetch } from "../../lib/api/client";
 import {
   createPostComment,
   fetchPostComments,
@@ -60,11 +60,19 @@ describe("fetchPostDetail", () => {
     expect(result?.viewer_has_liked).toBe(true);
   });
 
-  it("returns null when request fails", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new Error("boom"));
+  it("returns null when backend returns 404", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
 
     const result = await fetchPostDetail("42", "token123");
     expect(result).toBeNull();
+  });
+
+  it("throws on non-404 backend failure", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(new Error("boom"));
+
+    await expect(fetchPostDetail("42", "token123")).rejects.toThrow("boom");
   });
 });
 
@@ -100,11 +108,19 @@ describe("fetchPostComments", () => {
     expect(result).toHaveLength(1);
   });
 
-  it("returns empty array when request fails", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new Error("boom"));
+  it("returns empty array when backend returns 404", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
 
     const result = await fetchPostComments("42", "token123");
     expect(result).toEqual([]);
+  });
+
+  it("throws on non-404 backend failure", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(new Error("boom"));
+
+    await expect(fetchPostComments("42", "token123")).rejects.toThrow("boom");
   });
 });
 
@@ -127,10 +143,22 @@ describe("likePostRequest", () => {
     );
   });
 
-  it("returns null on failure", async () => {
+  it("throws ApiError on unexpected failure", async () => {
     apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
-    const result = await likePostRequest("42", "token123");
-    expect(result).toBeNull();
+    await expect(likePostRequest("42", "token123")).rejects.toMatchObject({
+      status: 500,
+      name: "ApiError",
+    });
+  });
+
+  it("preserves backend error status", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+    await expect(likePostRequest("42", "token123")).rejects.toMatchObject({
+      status: 404,
+      message: "Post not found",
+    });
   });
 });
 
@@ -153,10 +181,12 @@ describe("unlikePostRequest", () => {
     );
   });
 
-  it("returns null on failure", async () => {
+  it("throws ApiError on unexpected failure", async () => {
     apiServerFetchMock.mockRejectedValueOnce(new Error("bad"));
-    const result = await unlikePostRequest("42", "token123");
-    expect(result).toBeNull();
+    await expect(unlikePostRequest("42", "token123")).rejects.toMatchObject({
+      status: 500,
+      name: "ApiError",
+    });
   });
 });
 
@@ -188,9 +218,13 @@ describe("createPostComment", () => {
     );
   });
 
-  it("returns null on failure", async () => {
+  it("throws ApiError on unexpected failure", async () => {
     apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
-    const result = await createPostComment("42", "Hello", "token123");
-    expect(result).toBeNull();
+    await expect(
+      createPostComment("42", "Hello", "token123"),
+    ).rejects.toMatchObject({
+      status: 500,
+      name: "ApiError",
+    });
   });
 });

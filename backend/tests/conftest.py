@@ -2,20 +2,35 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
 from api.deps import get_db
 from app import create_app
-from models import Comment, Follow, Like, Post, RefreshToken, User
+from core.config import settings
 from services import RateLimiter, set_rate_limiter
+
+
+def _run_alembic_migrations(database_url: str) -> None:
+    """Apply Alembic migrations to the given database URL."""
+    backend_dir = Path(__file__).resolve().parents[1]
+    alembic_cfg = Config(str(backend_dir / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+
+    original_database_url = settings.database_url
+    try:
+        settings.database_url = database_url
+        command.upgrade(alembic_cfg, "head")
+    finally:
+        settings.database_url = original_database_url
 
 
 @pytest.fixture(scope="session")
@@ -26,16 +41,23 @@ def event_loop() -> Iterator[asyncio.AbstractEventLoop]:
     loop.close()
 
 
+@pytest.fixture(scope="session")
+def test_database_url(tmp_path_factory) -> str:
+    """Create and migrate a file-backed SQLite database for tests."""
+    db_dir = tmp_path_factory.mktemp("sqlite")
+    db_path = db_dir / "backend-test.db"
+    database_url = f"sqlite+aiosqlite:///{db_path}"
+    _run_alembic_migrations(database_url)
+    return database_url
+
+
 @pytest_asyncio.fixture(scope="session")
-async def test_engine() -> AsyncIterator:
-    """Create an in-memory SQLite engine for tests."""
+async def test_engine(test_database_url: str) -> AsyncIterator:
+    """Create an async engine bound to the migrated SQLite test database."""
     engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
+        test_database_url,
         connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
     )
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
     yield engine
     await engine.dispose()
 
@@ -71,8 +93,8 @@ async def async_client(app: FastAPI) -> AsyncIterator[AsyncClient]:
 async def clean_database(session_maker) -> AsyncIterator[None]:
     """Clear tables before each test to guarantee isolation."""
     async with session_maker() as session:
-        for model in (RefreshToken, Like, Comment, Follow, Post, User):
-            await session.execute(delete(model))
+        for table in reversed(SQLModel.metadata.sorted_tables):
+            await session.execute(table.delete())
         await session.commit()
     yield
 

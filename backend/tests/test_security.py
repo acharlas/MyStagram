@@ -3,6 +3,9 @@
 from datetime import timedelta
 
 
+import pytest
+
+from core.config import Settings
 from core.security import (
     create_access_token,
     create_refresh_token,
@@ -40,3 +43,28 @@ def test_refresh_token_has_refresh_type():
 
     assert payload["type"] == "refresh"
     assert payload["sub"] == "user-id"
+
+
+def test_settings_reject_insecure_secret_in_production():
+    with pytest.raises(ValueError):
+        Settings(APP_ENV="production", SECRET_KEY="mystagram-demo-secret")
+
+
+def test_settings_require_secret_in_production(monkeypatch):
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+
+    with pytest.raises(ValueError):
+        Settings(APP_ENV="production", _env_file=None)
+
+
+def test_settings_accept_legacy_jwt_secret_alias(monkeypatch):
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+
+    settings = Settings(
+        APP_ENV="local",
+        JWT_SECRET="legacy-secret-value",
+        _env_file=None,
+    )
+    assert settings.secret_key == "legacy-secret-value"

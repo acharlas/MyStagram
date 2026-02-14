@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { NavBar } from "@/components/ui/navbar";
@@ -9,12 +10,18 @@ export default async function ProtectedLayout({
   children: ReactNode;
 }) {
   const session = await getSessionServer();
-  const username = session?.user?.username ?? session?.user?.name ?? "";
+  if (!session?.accessToken || session.error) {
+    redirect("/login");
+  }
+
+  const username = session?.user?.username ?? "";
 
   return (
-    <div className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100">
+    <div className="min-h-screen bg-transparent text-zinc-100 lg:flex">
       <NavBar username={username} />
-      <main className="flex-1 overflow-y-auto bg-zinc-900 p-8">{children}</main>
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 pt-4 sm:px-6 lg:max-w-none lg:px-8 lg:pb-10 lg:pt-8 xl:px-10">
+        {children}
+      </main>
     </div>
   );
 }

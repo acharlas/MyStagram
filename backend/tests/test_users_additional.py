@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import Response
+from sqlalchemy.exc import IntegrityError
 
 from api.v1 import users
 from models import Follow, User
@@ -75,6 +77,30 @@ async def test_follow_and_unfollow_direct(db_session):
 
 
 @pytest.mark.asyncio
+async def test_follow_user_handles_unique_violation_on_commit(db_session, monkeypatch):
+    follower = _make_user("race_follower")
+    followee = _make_user("race_followee")
+    db_session.add_all([follower, followee])
+    await db_session.commit()
+
+    async def failing_commit() -> None:
+        raise IntegrityError(
+            "INSERT INTO follows",
+            {"follower_id": follower.id, "followee_id": followee.id},
+            Exception("duplicate key value violates unique constraint"),
+        )
+
+    monkeypatch.setattr(db_session, "commit", failing_commit)
+
+    result = await users.follow_user(
+        followee.username,
+        current_user=follower,
+        session=db_session,
+    )
+    assert result["detail"] == "Already following"
+
+
+@pytest.mark.asyncio
 async def test_list_followers_and_following(db_session):
     alice = _make_user("alice")
     bob = _make_user("bob")
@@ -86,8 +112,16 @@ async def test_list_followers_and_following(db_session):
     db_session.add(Follow(follower_id=alice.id, followee_id=charlie.id))
     await db_session.commit()
 
-    followers = await users.list_followers(alice.username, session=db_session)
+    followers = await users.list_followers(
+        alice.username,
+        response=Response(),
+        session=db_session,
+    )
     assert [item.username for item in followers] == ["bob"]
 
-    following = await users.list_following(alice.username, session=db_session)
+    following = await users.list_following(
+        alice.username,
+        response=Response(),
+        session=db_session,
+    )
     assert [item.username for item in following] == ["charlie"]

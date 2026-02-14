@@ -3,19 +3,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiServerFetch } from "../../lib/api/client";
 
 const originalFetch = globalThis.fetch;
+const cookieState = vi.hoisted(() => ({
+  access_token: "session-token" as string | undefined,
+  refresh_token: undefined as string | undefined,
+  nextauth_session: "nextauth-sensitive" as string | undefined,
+}));
 
 vi.mock("next/headers", () => ({
   cookies: () =>
     Promise.resolve({
-      get: (name: string) =>
-        name === "access_token" ? { name, value: "session-token" } : undefined,
-      getAll: () => [],
+      get: (name: string) => {
+        const value = cookieState[name as keyof typeof cookieState];
+        return typeof value === "string" ? { name, value } : undefined;
+      },
+      getAll: () =>
+        Object.entries(cookieState)
+          .filter(([, value]) => typeof value === "string")
+          .map(([name, value]) => ({ name, value: value as string })),
     }),
 }));
 
 describe("apiServerFetch", () => {
   beforeEach(() => {
     process.env.BACKEND_API_URL = "http://backend:8000";
+    cookieState.access_token = "session-token";
+    cookieState.refresh_token = undefined;
+    cookieState.nextauth_session = "nextauth-sensitive";
   });
 
   afterEach(() => {
@@ -39,6 +52,7 @@ describe("apiServerFetch", () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer session-token",
+          Cookie: "access_token=session-token",
         }),
       }),
     );
@@ -64,6 +78,38 @@ describe("apiServerFetch", () => {
           Authorization: "Bearer custom-token",
         }),
       }),
+    );
+  });
+
+  it("forwards only auth cookies and avoids duplicate cookie names", async () => {
+    cookieState.access_token = "store-access";
+    cookieState.refresh_token = "store-refresh";
+    cookieState.nextauth_session = "sensitive";
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true }),
+    });
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    await apiServerFetch("/api/test", {
+      headers: {
+        Cookie: "theme=dark; access_token=explicit-access",
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://backend:8000/api/test",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Cookie:
+            "theme=dark; access_token=explicit-access; refresh_token=store-refresh",
+          Authorization: "Bearer explicit-access",
+        }),
+      }),
+    );
+    expect(JSON.stringify(fetchMock.mock.calls[0]?.[1] ?? {})).not.toContain(
+      "nextauth_session",
     );
   });
 

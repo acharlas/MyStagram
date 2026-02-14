@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from io import BytesIO
-from typing import Any, cast
+from typing import Annotated, Any, cast
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from api.deps import get_current_user, get_db
 from core import settings
+from db.errors import is_unique_violation
 from models import Comment, Follow, Like, Post, User
+from .pagination import MAX_PAGE_SIZE, set_next_offset_header
+from .post_views import PostResponse, build_home_feed, collect_like_meta
 from services import (
     UploadTooLargeError,
     ensure_bucket,
@@ -31,40 +36,24 @@ def _eq(column: Any, value: Any) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], column == value)
 
 
-class PostResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+def _desc(column: Any) -> Any:
+    return cast(Any, column).desc()
 
-    id: int
-    author_id: str
-    author_name: str | None = None
-    author_username: str | None = None
-    image_key: str
-    caption: str | None = None
-    like_count: int = 0
-    viewer_has_liked: bool = False
 
-    @classmethod
-    def from_post(
-        cls,
-        post: Post,
-        author_name: str | None = None,
-        author_username: str | None = None,
-        *,
-        like_count: int = 0,
-        viewer_has_liked: bool = False,
-    ) -> "PostResponse":
-        if post.id is None:
-            raise ValueError("Post record missing identifier")
-        return cls(
-            id=post.id,
-            author_id=post.author_id,
-            author_name=author_name,
-            author_username=author_username,
-            image_key=post.image_key,
-            caption=post.caption,
-            like_count=like_count,
-            viewer_has_liked=viewer_has_liked,
-        )
+def _asc(column: Any) -> Any:
+    return cast(Any, column).asc()
+
+
+def _upload_post_image(object_key: str, processed_bytes: bytes, content_type: str) -> None:
+    client = get_minio_client()
+    ensure_bucket(client)
+    client.put_object(
+        settings.minio_bucket,
+        object_key,
+        data=BytesIO(processed_bytes),
+        length=len(processed_bytes),
+        content_type=content_type,
+    )
 
 
 class CommentResponse(BaseModel):
@@ -98,42 +87,10 @@ class CommentResponse(BaseModel):
         )
 
 
-PostResponse.model_rebuild()
 CommentResponse.model_rebuild()
 
 class CommentCreateRequest(BaseModel):
     text: str = Field(min_length=1, max_length=500)
-
-
-async def collect_like_meta(
-    session: AsyncSession,
-    post_ids: list[int],
-    viewer_id: str | None,
-) -> tuple[dict[int, int], set[int]]:
-    if not post_ids:
-        return {}, set()
-
-    post_id_column = cast(ColumnElement[int], Like.post_id)
-    user_id_column = cast(ColumnElement[str], Like.user_id)
-    count_column = cast(Any, func.count(user_id_column))
-    count_result = await session.execute(
-        select(post_id_column, count_column)
-        .where(post_id_column.in_(post_ids))
-        .group_by(post_id_column)
-    )
-    count_map = {post_id: int(total) for post_id, total in count_result.all()}
-
-    if viewer_id is None:
-        return count_map, set()
-
-    viewer_result = await session.execute(
-        select(post_id_column).where(
-            _eq(user_id_column, viewer_id),
-            post_id_column.in_(post_ids),
-        )
-    )
-    liked_set = {row[0] for row in viewer_result.all()}
-    return count_map, liked_set
 
 
 async def _get_like_count(session: AsyncSession, post_id: int) -> int:
@@ -191,14 +148,11 @@ async def create_post(
         )
 
     object_key = f"posts/{current_user.id}/{uuid4().hex}.jpg"
-    client = get_minio_client()
-    ensure_bucket(client)
-    client.put_object(
-        settings.minio_bucket,
+    await asyncio.to_thread(
+        _upload_post_image,
         object_key,
-        data=BytesIO(processed_bytes),
-        length=len(processed_bytes),
-        content_type=content_type,
+        processed_bytes,
+        content_type,
     )
 
     post = Post(
@@ -220,6 +174,9 @@ async def create_post(
 
 @router.get("", response_model=list[PostResponse])
 async def list_posts(
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[PostResponse]:
@@ -230,12 +187,27 @@ async def list_posts(
             detail="User record missing identifier",
         )
 
-    result = await session.execute(
+    query = (
         select(Post)
         .where(_eq(Post.author_id, viewer_id))
-        .order_by(Post.created_at.desc())  # type: ignore[attr-defined]
+        .order_by(
+            _desc(cast(Any, Post.created_at)),
+            _desc(cast(Any, Post.id)),
+        )
     )
+    if offset > 0:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit + 1)
+
+    result = await session.execute(query)
     posts = result.scalars().all()
+    if limit is not None:
+        has_more = len(posts) > limit
+        if has_more:
+            posts = posts[:limit]
+        set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
     post_ids = [post.id for post in posts if post.id is not None]
     count_map, liked_set = await collect_like_meta(session, post_ids, viewer_id)
     return [
@@ -252,38 +224,19 @@ async def list_posts(
 
 @router.get("/feed", response_model=list[PostResponse])
 async def get_feed(
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[PostResponse]:
-    if current_user.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
-
-    post_entity = cast(Any, Post)
-    author_name_column = cast(ColumnElement[str | None], User.name)
-    author_username_column = cast(ColumnElement[str | None], User.username)
-    result = await session.execute(
-        select(post_entity, author_name_column, author_username_column)
-        .join(User, _eq(User.id, Post.author_id))
-        .join(Follow, _eq(Follow.followee_id, Post.author_id))
-        .where(_eq(Follow.follower_id, current_user.id))
-        .order_by(Post.created_at.desc())  # type: ignore[attr-defined]
+    return await build_home_feed(
+        response=response,
+        limit=limit,
+        offset=offset,
+        session=session,
+        current_user=current_user,
     )
-    rows = result.all()
-    post_ids = [post.id for post, _name, _username in rows if post.id is not None]
-    count_map, liked_set = await collect_like_meta(session, post_ids, current_user.id)
-    return [
-        PostResponse.from_post(
-            post,
-            author_name=author_name,
-            author_username=username,
-            like_count=count_map.get(post.id, 0) if post.id is not None else 0,
-            viewer_has_liked=post.id in liked_set if post.id is not None else False,
-        )
-        for post, author_name, username in rows
-    ]
 
 
 @router.get("/{post_id}", response_model=PostResponse)
@@ -336,6 +289,9 @@ async def get_post(
 @router.get("/{post_id}/comments", response_model=list[CommentResponse])
 async def get_post_comments(
     post_id: int,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[CommentResponse]:
@@ -362,13 +318,28 @@ async def get_post_comments(
     comment_entity = cast(Any, Comment)
     author_name_column = cast(ColumnElement[str | None], User.name)
     author_username_column = cast(ColumnElement[str | None], User.username)
-    result = await session.execute(
+    query = (
         select(comment_entity, author_name_column, author_username_column)
         .join(User, _eq(User.id, Comment.author_id))
         .where(_eq(Comment.post_id, post_id))
-        .order_by(Comment.created_at.asc())  # type: ignore[attr-defined]
+        .order_by(
+            _asc(cast(Any, Comment.created_at)),
+            _asc(cast(Any, Comment.id)),
+        )
     )
+    if offset > 0:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit + 1)
+
+    result = await session.execute(query)
     rows = result.all()
+    if limit is not None:
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]
+        set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
     return [
         CommentResponse.from_comment(
             comment,
@@ -472,7 +443,12 @@ async def like_post(
     if like_obj is None:
         like = Like(user_id=viewer_id, post_id=post_id)
         session.add(like)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            await session.rollback()
+            if not is_unique_violation(exc):
+                raise
     like_count = await _get_like_count(session, post_id)
     return {"detail": "Liked", "like_count": like_count}
 

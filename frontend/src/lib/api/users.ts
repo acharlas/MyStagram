@@ -24,6 +24,10 @@ export type UserProfilePublic = {
   avatar_key: string | null;
 };
 
+export type FollowStatusResponse = {
+  is_following: boolean;
+};
+
 export type FollowMutationResult = {
   success: boolean;
   status: number;
@@ -56,8 +60,7 @@ export async function fetchUserProfile(
     if (error instanceof ApiError && error.status === 404) {
       return null;
     }
-    console.error("Failed to load user profile", error);
-    return null;
+    throw error;
   }
 }
 
@@ -77,8 +80,7 @@ export async function fetchUserPosts(
     if (error instanceof ApiError && error.status === 404) {
       return [];
     }
-    console.error("Failed to load user posts", error);
-    return [];
+    throw error;
   }
 }
 
@@ -86,18 +88,33 @@ export async function fetchUserFollowers(
   username: string,
   accessToken?: string,
 ): Promise<UserProfilePublic[]> {
-  try {
-    return await apiServerFetch<UserProfilePublic[]>(
-      `${buildProfilePath(username)}/followers`,
-      {
-        cache: "no-store",
-        headers: buildHeaders(accessToken),
-      },
-    );
-  } catch (error) {
-    console.error("Failed to load user followers", error);
-    return [];
+  // Contract: this helper propagates backend errors, including 404 for missing users.
+  return apiServerFetch<UserProfilePublic[]>(
+    `${buildProfilePath(username)}/followers`,
+    {
+      cache: "no-store",
+      headers: buildHeaders(accessToken),
+    },
+  );
+}
+
+export async function fetchUserFollowStatus(
+  username: string,
+  accessToken?: string,
+): Promise<boolean> {
+  // Contract: missing local auth state means "not following"; backend failures propagate.
+  if (!accessToken) {
+    return false;
   }
+
+  const result = await apiServerFetch<FollowStatusResponse>(
+    `${buildProfilePath(username)}/follow-status`,
+    {
+      cache: "no-store",
+      headers: buildHeaders(accessToken),
+    },
+  );
+  return result.is_following;
 }
 
 function buildFollowUrl(username: string): string {

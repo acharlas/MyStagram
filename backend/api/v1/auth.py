@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, cast
+from collections.abc import Sequence
+from typing import Any, Callable, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from sqlalchemy import or_, select
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
@@ -22,6 +24,7 @@ from core import (
     settings,
     verify_password,
 )
+from db.errors import is_unique_violation
 from models import RefreshToken, User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -38,12 +41,50 @@ def _eq(column: Any, value: Any) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], column == value)
 
 
+def _normalize_email(value: str) -> str:
+    return value.strip().lower()
+
+
+def _asc(column: Any) -> Any:
+    return cast(Any, column).asc()
+
+
+def _resolve_user_from_candidates(
+    candidates: Sequence[User],
+    *,
+    password: str,
+    preferred_identifier: str | None = None,
+    identifier_getter: Callable[[User], str | None] | None = None,
+) -> User | None:
+    ordered_candidates = candidates
+    if preferred_identifier is not None and identifier_getter is not None:
+        ordered_candidates = sorted(
+            candidates,
+            key=lambda candidate: 0
+            if identifier_getter(candidate) == preferred_identifier
+            else 1,
+        )
+
+    for candidate in ordered_candidates:
+        if verify_password(password, candidate.password_hash):
+            return candidate
+    return None
+
+
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=3, max_length=30)
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     name: str | None = Field(default=None, max_length=80)
     bio: str | None = None
+
+    @field_validator("username")
+    @classmethod
+    def _reject_email_like_username(cls, value: str) -> str:
+        normalized = value.strip()
+        if "@" in normalized:
+            raise ValueError("Username cannot contain '@'")
+        return normalized
 
 
 class UserResponse(BaseModel):
@@ -57,7 +98,9 @@ class UserResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    username: str = Field(min_length=3, max_length=30)
+    # The frontend uses one field for username/email identifier.
+    # Allow up to email column length so valid emails are not rejected at validation.
+    username: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8, max_length=128)
 
 
@@ -194,10 +237,22 @@ async def register(
     payload: RegisterRequest,
     session: AsyncSession = Depends(get_db),
 ) -> UserResponse:
+    normalized_email = _normalize_email(str(payload.email))
+    lowered_email_column = cast(Any, func.lower(cast(Any, User.email)))
+    email_alias_column = cast(Any, User.email_login_alias)
+    lowered_username_column = cast(Any, func.lower(cast(Any, User.username)))
     existing = await session.execute(
         select(User)
         .where(
-            or_(_eq(User.username, payload.username), _eq(User.email, payload.email))
+            or_(
+                _eq(User.username, payload.username),
+                _eq(lowered_email_column, normalized_email),
+                # Preserve ownership of legacy login aliases produced by
+                # case-insensitive email deduplication migration.
+                _eq(email_alias_column, normalized_email),
+                # Guard against legacy accounts that used email-like usernames.
+                _eq(lowered_username_column, normalized_email),
+            )
         )
         .limit(1)
     )
@@ -209,14 +264,22 @@ async def register(
 
     user = User(
         username=payload.username,
-        email=payload.email,
+        email=normalized_email,
         password_hash=hash_password(payload.password),
         name=payload.name,
         bio=payload.bio,
     )
     session.add(user)
-    await session.commit()
-    await session.refresh(user)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        if is_unique_violation(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User with that username or email already exists",
+            ) from exc
+        raise
     return UserResponse.model_validate(user)
 
 
@@ -226,9 +289,60 @@ async def login(
     response: Response,
     session: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
-    result = await session.execute(select(User).where(_eq(User.username, payload.username)))
-    user = result.scalar_one_or_none()
-    if user is None or not verify_password(payload.password, user.password_hash):
+    identifier = payload.username.strip()
+    user: User | None = None
+    # Deterministic resolution:
+    # - if it looks like an email, prefer email match
+    # - fallback to migration login aliases and legacy email-like usernames
+    if "@" in identifier:
+        lowered_identifier = _normalize_email(identifier)
+        lowered_email_column = cast(Any, func.lower(cast(Any, User.email)))
+        email_result = await session.execute(
+            select(User)
+            .where(_eq(lowered_email_column, lowered_identifier))
+            .order_by(_asc(User.created_at), _asc(User.id))
+        )
+        user = _resolve_user_from_candidates(
+            email_result.scalars().all(),
+            password=payload.password,
+            preferred_identifier=identifier,
+            identifier_getter=lambda candidate: candidate.email,
+        )
+
+        if user is None:
+            alias_result = await session.execute(
+                select(User)
+                .where(_eq(User.email_login_alias, lowered_identifier))
+                .order_by(_asc(User.created_at), _asc(User.id))
+            )
+            user = _resolve_user_from_candidates(
+                alias_result.scalars().all(),
+                password=payload.password,
+                preferred_identifier=lowered_identifier,
+                identifier_getter=lambda candidate: candidate.email_login_alias,
+            )
+
+        if user is None:
+            legacy_result = await session.execute(
+                select(User)
+                .where(_eq(func.lower(cast(Any, User.username)), lowered_identifier))
+                .order_by(_asc(User.created_at), _asc(User.id))
+            )
+            user = _resolve_user_from_candidates(
+                legacy_result.scalars().all(),
+                password=payload.password,
+                preferred_identifier=identifier,
+                identifier_getter=lambda candidate: candidate.username,
+            )
+    else:
+        result = await session.execute(
+            select(User).where(_eq(User.username, identifier)).limit(1)
+        )
+        user = result.scalar_one_or_none()
+        if user is not None and not verify_password(payload.password, user.password_hash):
+            user = None
+
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
@@ -294,16 +408,18 @@ async def refresh_tokens(
             detail="Invalid refresh token",
         )
 
-    now = datetime.now(timezone.utc)
-    token_obj.revoked_at = now
+    if token_obj.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
 
+    # Keep refresh token stable to avoid multi-instance refresh races where
+    # different frontend nodes process the same valid refresh token in parallel.
     access_token = create_access_token(str(user_id))
-    new_refresh_token = create_refresh_token(str(user_id))
-    await _store_refresh_token(session, user_id, new_refresh_token)
-    await session.commit()
 
-    _set_token_cookies(response, access_token, new_refresh_token)
-    return TokenResponse(access_token=access_token, refresh_token=new_refresh_token)
+    _set_token_cookies(response, access_token, refresh_token)
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)

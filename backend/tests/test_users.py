@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from core.config import settings
-from models import Follow, Like, Post, User
+from models import Like, Post, User
 from api.v1 import users as users_api
 from services import storage
 
@@ -130,6 +130,29 @@ async def test_get_me_returns_private_profile(async_client: AsyncClient):
     body = response.json()
     assert body["username"] == payload["username"]
     assert body["email"] == payload["email"]
+
+
+@pytest.mark.asyncio
+async def test_update_me_rejects_too_long_name(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    payload = build_payload()
+    await async_client.post("/api/v1/auth/register", json=payload)
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": payload["username"], "password": payload["password"]},
+    )
+
+    response = await async_client.patch("/api/v1/me", data={"name": "x" * 81})
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert "at most 80 characters" in response.json()["detail"]
+
+    db_result = await db_session.execute(
+        select(User).where(_eq(User.username, payload["username"]))
+    )
+    user = db_result.scalar_one()
+    assert user.name == payload["name"]
 
 
 @pytest.mark.asyncio
@@ -294,6 +317,7 @@ async def test_list_user_posts_visible_to_owner(
 
     response = await async_client.get(f"/api/v1/users/{owner['username']}/posts")
     assert response.status_code == 200
+    assert response.headers.get("x-next-offset") is None
     body = response.json()
     assert len(body) == 1
     assert body[0]["id"] == post.id
@@ -303,7 +327,7 @@ async def test_list_user_posts_visible_to_owner(
 
 
 @pytest.mark.asyncio
-async def test_list_user_posts_requires_follow(
+async def test_list_user_posts_visible_to_authenticated_non_follower(
     async_client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
@@ -328,25 +352,13 @@ async def test_list_user_posts_requires_follow(
     await db_session.commit()
     await db_session.refresh(post)
 
-    await async_client.post(
-        "/api/v1/auth/login",
-        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
-    )
-
-    response = await async_client.get(f"/api/v1/users/{author_payload['username']}/posts")
-    assert response.status_code == status.HTTP_200_OK
-    items = response.json()
-    assert len(items) == 1
-    assert items[0]["id"] == post.id
-    assert items[0]["like_count"] == 0
-    assert items[0]["viewer_has_liked"] is False
-
-    await async_client.post("/api/v1/auth/logout")
-
-    follow = Follow(follower_id=viewer.id, followee_id=author.id)
-    db_session.add(follow)
     db_session.add(Like(user_id=viewer.id, post_id=post.id))
     await db_session.commit()
+
+    unauthenticated_response = await async_client.get(
+        f"/api/v1/users/{author_payload['username']}/posts"
+    )
+    assert unauthenticated_response.status_code == status.HTTP_401_UNAUTHORIZED
 
     await async_client.post(
         "/api/v1/auth/login",
@@ -357,8 +369,57 @@ async def test_list_user_posts_requires_follow(
         f"/api/v1/users/{author_payload['username']}/posts"
     )
     assert allowed_response.status_code == 200
+    assert allowed_response.headers.get("x-next-offset") is None
     items = allowed_response.json()
     assert len(items) == 1
     assert items[0]["id"] == post.id
     assert items[0]["like_count"] == 1
     assert items[0]["viewer_has_liked"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_user_posts_supports_limit_and_offset(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    author_payload = make_payload_for("author_paginated")
+    viewer_payload = make_payload_for("viewer_paginated")
+    await async_client.post("/api/v1/auth/register", json=author_payload)
+    await async_client.post("/api/v1/auth/register", json=viewer_payload)
+
+    author = (
+        await db_session.execute(
+            select(User).where(_eq(User.username, author_payload["username"]))
+        )
+    ).scalar_one()
+
+    for idx in range(8):
+        db_session.add(
+            Post(
+                author_id=author.id,
+                image_key=f"posts/paginated-{idx}.jpg",
+                caption=f"Post {idx}",
+            )
+        )
+    await db_session.commit()
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+
+    first_page = await async_client.get(
+        f"/api/v1/users/{author_payload['username']}/posts",
+        params={"limit": 3, "offset": 0},
+    )
+    assert first_page.status_code == 200
+    assert len(first_page.json()) == 3
+    assert first_page.headers.get("x-next-offset") == "3"
+
+    second_page = await async_client.get(
+        f"/api/v1/users/{author_payload['username']}/posts",
+        params={"limit": 3, "offset": 3},
+    )
+    assert second_page.status_code == 200
+    assert len(second_page.json()) == 3
+    assert second_page.headers.get("x-next-offset") == "6"

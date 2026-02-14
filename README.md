@@ -52,7 +52,7 @@ JWT_SECRET=<random-string>
 ### `.env.frontend`
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_MINIO_BASE_URL=http://localhost:9000/instagram-media
+NEXT_PUBLIC_MINIO_BASE_URL=http://minio:9000/instagram-media
 NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=<random-string>
 ```
@@ -65,7 +65,6 @@ The sample values above are safe defaults for local development. Replace the pla
 
 1. **Install prerequisites**
    - Docker Desktop (or Docker Engine + Compose v2)
-   - Node.js 20+ (only required if you plan to run the frontend outside Docker)
 
 2. **Boot the stack**
    ```bash
@@ -75,7 +74,26 @@ The sample values above are safe defaults for local development. Replace the pla
    - Backend docs: http://localhost:8000/docs  
    - MinIO console: http://localhost:9001
 
-3. **Stop the stack**
+3. **Seed demo data (users, follows, posts with captions and placeholder images)**
+   ```bash
+   docker compose exec backend uv run python scripts/seed.py
+   ```
+   Demo accounts:
+   - `demo_alex` / `password123`
+   - `demo_bella` / `password123`
+   - `demo_cara` / `password123`
+
+   Optional: use your own images for a richer feed.
+   - Fast path: put images directly in `backend/scripts/seed_media/` and they will be auto-distributed across demo users.
+   - Or target a user: `backend/scripts/seed_media/<username>/<image-file>`.
+   - Example: `backend/scripts/seed_media/demo_alex/beach.jpg`
+   - Re-run seed; files are uploaded to MinIO and used as feed posts.
+   - Custom media path:
+     ```bash
+     docker compose exec -e SEED_MEDIA_DIR=/app/scripts/seed_media backend uv run python scripts/seed.py
+     ```
+
+4. **Stop the stack**
    ```bash
    docker compose down
    ```
@@ -83,25 +101,9 @@ The sample values above are safe defaults for local development. Replace the pla
 
 ---
 
-## Local Development Tips
+## Runtime Model
 
-- **Backend**
-  ```bash
-  cd backend
-  uv sync
-  uv run uvicorn main:app --reload
-  uv run pytest
-  ```
-
-- **Frontend**
-  ```bash
-  cd frontend
-  npm install
-  npm run dev
-  npm run test
-  ```
-
-Use the Docker services for database, Redis, and storage even when running backend/frontend locally.
+This project is Docker-only. Run backend and frontend through `docker compose`; direct host execution with `npm`, `uv`, or `python` is not a supported workflow.
 
 ---
 

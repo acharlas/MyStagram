@@ -9,6 +9,7 @@ declare module "next-auth" {
       avatarUrl: string | null;
     };
     accessToken?: string;
+    error?: string;
   }
 
   interface User {
@@ -27,5 +28,7 @@ declare module "next-auth/jwt" {
     avatarUrl?: string | null;
     accessToken?: string;
     refreshToken?: string;
+    accessTokenExpires?: number;
+    error?: string;
   }
 }

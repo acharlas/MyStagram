@@ -5,6 +5,9 @@ from __future__ import annotations
 import time
 from functools import lru_cache
 from ipaddress import ip_address, ip_network, IPv4Address, IPv4Network, IPv6Address, IPv6Network
+import hashlib
+import hmac
+import re
 from typing import Callable, Iterable, Protocol, runtime_checkable
 
 from fastapi import status
@@ -14,7 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.types import ASGIApp
 
-from core import settings
+from core import decode_token, settings
 
 
 @runtime_checkable
@@ -22,6 +25,15 @@ class SupportsRateLimitClient(Protocol):
     async def incr(self, key: str) -> int: ...
 
     async def expire(self, key: str, ttl: int) -> None: ...
+
+
+ACCESS_COOKIE_NAME = "access_token"
+REFRESH_COOKIE_NAME = "refresh_token"
+SUPPORTED_TOKEN_TYPES = frozenset({"access", "refresh"})
+FORWARDED_CLIENT_KEY_HEADER = "x-rate-limit-client"
+FORWARDED_CLIENT_SIGNATURE_HEADER = "x-rate-limit-signature"
+FORWARDED_CLIENT_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
+FORWARDED_CLIENT_SIGNATURE_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _parse_networks() -> tuple[IPv4Network | IPv6Network, ...]:
@@ -56,6 +68,87 @@ def _extract_client_ip_from_headers(request: Request) -> str | None:
     return None
 
 
+def _extract_subject_from_token(token: str) -> str | None:
+    try:
+        payload = decode_token(token)
+    except ValueError:
+        return None
+
+    token_type = payload.get("type")
+    if token_type not in SUPPORTED_TOKEN_TYPES:
+        return None
+
+    subject = payload.get("sub")
+    if isinstance(subject, int):
+        return str(subject)
+    if isinstance(subject, str):
+        normalized = subject.strip()
+        return normalized or None
+    return None
+
+
+def _extract_bearer_token(request: Request) -> str | None:
+    authorization = request.headers.get("authorization")
+    if not authorization:
+        return None
+
+    scheme, _, value = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    token = value.strip()
+    return token or None
+
+
+def _extract_authenticated_client_identifier(request: Request) -> str | None:
+    access_token = request.cookies.get(ACCESS_COOKIE_NAME)
+    if access_token:
+        subject = _extract_subject_from_token(access_token)
+        if subject:
+            return f"user:{subject}"
+
+    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if refresh_token:
+        subject = _extract_subject_from_token(refresh_token)
+        if subject:
+            return f"user:{subject}"
+
+    bearer_token = _extract_bearer_token(request)
+    if bearer_token:
+        subject = _extract_subject_from_token(bearer_token)
+        if subject:
+            return f"user:{subject}"
+
+    return None
+
+
+def _extract_forwarded_client_identifier(request: Request) -> str | None:
+    proxy_secret = settings.rate_limit_proxy_secret.strip()
+    if not proxy_secret:
+        return None
+
+    candidate = request.headers.get(FORWARDED_CLIENT_KEY_HEADER)
+    if not candidate:
+        return None
+    normalized = candidate.strip()
+    if not FORWARDED_CLIENT_KEY_PATTERN.fullmatch(normalized):
+        return None
+
+    provided_signature = request.headers.get(FORWARDED_CLIENT_SIGNATURE_HEADER, "")
+    signature = provided_signature.strip().lower()
+    if not FORWARDED_CLIENT_SIGNATURE_PATTERN.fullmatch(signature):
+        return None
+
+    expected_signature = hmac.new(
+        proxy_secret.encode("utf-8"),
+        normalized.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected_signature):
+        return None
+
+    return f"proxy:{normalized}"
+
+
 def _remote_ip(request: Request) -> tuple[str | None, IPv4Address | IPv6Address | None]:
     host = request.client.host if request.client else None
     if not host:
@@ -67,11 +160,26 @@ def _remote_ip(request: Request) -> tuple[str | None, IPv4Address | IPv6Address 
     return host, addr
 
 
+def _is_trusted_proxy(remote_ip: IPv4Address | IPv6Address | None) -> bool:
+    if remote_ip is None:
+        return False
+    return any(remote_ip in network for network in _trusted_proxy_networks())
+
+
 def default_client_identifier(request: Request) -> str:
     """Resolve a stable client identifier for rate limiting."""
+    authenticated_identifier = _extract_authenticated_client_identifier(request)
+    if authenticated_identifier is not None:
+        return authenticated_identifier
+
     remote_host, remote_ip = _remote_ip(request)
 
-    if remote_ip is not None and any(remote_ip in network for network in _trusted_proxy_networks()):
+    # Only trust forwarded source IP headers from explicitly configured
+    # proxy/load balancer networks.
+    if _is_trusted_proxy(remote_ip):
+        forwarded_identifier = _extract_forwarded_client_identifier(request)
+        if forwarded_identifier is not None:
+            return forwarded_identifier
         forwarded_ip = _extract_client_ip_from_headers(request)
         if forwarded_ip:
             return forwarded_ip

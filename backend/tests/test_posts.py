@@ -1,5 +1,6 @@
 """Tests for post endpoints."""
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any, cast
@@ -10,11 +11,12 @@ from fastapi import status
 from httpx import AsyncClient
 from PIL import Image
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from core.config import settings
-from models import Comment, Like, Post
+from models import Comment, Follow, Like, Post, User
 from api.v1 import posts as posts_api
 from services import storage
 
@@ -96,6 +98,7 @@ async def test_create_and_get_post(
 
     list_response = await async_client.get("/api/v1/posts")
     assert list_response.status_code == 200
+    assert list_response.headers.get("x-next-offset") is None
     listed = list_response.json()
     assert len(listed) == 1
     assert listed[0]["like_count"] == 0
@@ -210,8 +213,18 @@ async def test_get_post_comments_requires_access(
 
     response = await async_client.get(f"/api/v1/posts/{post.id}/comments")
     assert response.status_code == 200
+    assert response.headers.get("x-next-offset") is None
     payload = response.json()
     assert [item["text"] for item in payload] == ["First!", "Thanks!"]
+
+    paginated = await async_client.get(
+        f"/api/v1/posts/{post.id}/comments",
+        params={"limit": 1, "offset": 1},
+    )
+    assert paginated.status_code == 200
+    assert paginated.headers.get("x-next-offset") is None
+    paginated_payload = paginated.json()
+    assert [item["text"] for item in paginated_payload] == ["Thanks!"]
 
     await async_client.post("/api/v1/auth/logout")
     author_login = await async_client.post(
@@ -346,6 +359,47 @@ async def test_like_and_unlike_post(
 
 
 @pytest.mark.asyncio
+async def test_like_is_idempotent_under_concurrency(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("viewer_race")
+    author_payload = make_user_payload("author_race")
+
+    viewer_response = await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+
+    viewer_id = viewer_response.json()["id"]
+    author_id = author_response.json()["id"]
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{author_payload['username']}/follow")
+
+    post = Post(author_id=author_id, image_key="posts/like-race.jpg", caption="Race me")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+
+    first, second = await asyncio.gather(
+        async_client.post(f"/api/v1/posts/{post.id}/likes"),
+        async_client.post(f"/api/v1/posts/{post.id}/likes"),
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["like_count"] == 1
+    assert second.json()["like_count"] == 1
+
+    result = await db_session.execute(
+        select(Like).where(_eq(Like.user_id, viewer_id), _eq(Like.post_id, post.id))
+    )
+    likes = result.scalars().all()
+    assert len(likes) == 1
+
+
+@pytest.mark.asyncio
 async def test_create_post_rejects_invalid_image(async_client: AsyncClient):
     payload = make_user_payload("invalid")
     await async_client.post("/api/v1/auth/register", json=payload)
@@ -431,6 +485,7 @@ async def test_feed_returns_followee_posts(
 
     response = await async_client.get("/api/v1/posts/feed")
     assert response.status_code == 200
+    assert response.headers.get("x-next-offset") is None
     feed = response.json()
 
     assert [item["caption"] for item in feed] == ["Followee2 newest", "Followee1 older"]
@@ -443,3 +498,44 @@ async def test_feed_returns_followee_posts(
 async def test_feed_requires_auth(async_client: AsyncClient):
     response = await async_client.get("/api/v1/posts/feed")
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_like_post_handles_unique_violation_on_commit(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    viewer = User(
+        id="viewer-like-race",
+        username="viewer_like_race",
+        email="viewer_like_race@example.com",
+        password_hash="hash",
+    )
+    author = User(
+        id="author-like-race",
+        username="author_like_race",
+        email="author_like_race@example.com",
+        password_hash="hash",
+    )
+    db_session.add_all([viewer, author])
+    await db_session.commit()
+
+    post = Post(author_id=author.id, image_key="posts/race.jpg", caption="Race")
+    db_session.add(post)
+    db_session.add(Follow(follower_id=viewer.id, followee_id=author.id))
+    await db_session.commit()
+    await db_session.refresh(post)
+
+    async def failing_commit() -> None:
+        raise IntegrityError(
+            "INSERT INTO likes",
+            {"user_id": viewer.id, "post_id": post.id},
+            Exception("duplicate key value violates unique constraint"),
+        )
+
+    monkeypatch.setattr(db_session, "commit", failing_commit)
+
+    assert post.id is not None
+    result = await posts_api.like_post(post.id, session=db_session, current_user=viewer)
+    assert result["detail"] == "Liked"
+    assert isinstance(result["like_count"], int)

@@ -72,18 +72,18 @@ export function LikeButton({
   };
 
   return (
-    <div className="flex items-center gap-2 text-zinc-300">
+    <div className="ui-text-muted flex items-center gap-2">
       <button
         type="button"
         onClick={toggle}
         disabled={isPending}
         aria-pressed={liked}
-        className="rounded-full p-2 transition hover:text-zinc-100 disabled:opacity-50"
+        className="rounded-full p-2 transition hover:bg-[color:var(--ui-surface-muted)] hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/70 disabled:opacity-50"
         aria-label={liked ? "Retirer le like" : "Aimer la publication"}
       >
         <HeartIcon filled={liked} />
       </button>
-      <span aria-live="polite" className="text-sm">
+      <span aria-live="polite" className="text-sm font-medium">
         {count}
       </span>
     </div>

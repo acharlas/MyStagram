@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
+import { ApiError } from "../../lib/api/client";
 import {
   fetchUserFollowers,
+  fetchUserFollowStatus,
   fetchUserPosts,
   fetchUserProfile,
   followUserRequest,
@@ -56,12 +57,20 @@ describe("fetchUserProfile", () => {
     );
   });
 
-  it("returns null when backend call fails", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new Error("boom"));
+  it("returns null on backend 404", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "User not found"),
+    );
 
     const result = await fetchUserProfile("missing");
 
     expect(result).toBeNull();
+  });
+
+  it("throws when backend call fails with non-404 status", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(new Error("boom"));
+
+    await expect(fetchUserProfile("missing")).rejects.toThrow("boom");
   });
 });
 
@@ -83,12 +92,20 @@ describe("fetchUserPosts", () => {
     );
   });
 
-  it("returns empty array on failure", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
+  it("returns empty array on backend 404", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "User not found"),
+    );
 
     const result = await fetchUserPosts("demo");
 
     expect(result).toEqual([]);
+  });
+
+  it("throws on non-404 failure", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
+
+    await expect(fetchUserPosts("demo")).rejects.toThrow("nope");
   });
 });
 
@@ -118,12 +135,61 @@ describe("fetchUserFollowers", () => {
     );
   });
 
-  it("returns empty list when backend call fails", async () => {
+  it("throws when backend returns 404", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "User not found"),
+    );
+
+    await expect(fetchUserFollowers("demo")).rejects.toThrow("User not found");
+  });
+
+  it("throws when backend call fails with non-404", async () => {
     apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
 
-    const result = await fetchUserFollowers("demo");
+    await expect(fetchUserFollowers("demo")).rejects.toThrow("nope");
+  });
+});
 
-    expect(result).toEqual([]);
+describe("fetchUserFollowStatus", () => {
+  it("returns follow status when backend call succeeds", async () => {
+    apiServerFetchMock.mockResolvedValueOnce({ is_following: true });
+
+    const result = await fetchUserFollowStatus("demo", "token-1");
+
+    expect(result).toBe(true);
+    expect(apiServerFetchMock).toHaveBeenCalledWith(
+      "/api/v1/users/demo/follow-status",
+      expect.objectContaining({
+        headers: {
+          Cookie: "access_token=token-1",
+        },
+      }),
+    );
+  });
+
+  it("returns false when no token is provided", async () => {
+    const result = await fetchUserFollowStatus("demo");
+
+    expect(result).toBe(false);
+    expect(apiServerFetchMock).not.toHaveBeenCalled();
+  });
+
+  it("throws on backend 404", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "User not found"),
+    );
+
+    await expect(fetchUserFollowStatus("demo", "token-1")).rejects.toThrow(
+      "User not found",
+    );
+  });
+
+  it("throws on non-404 backend failure", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
+
+    await expect(fetchUserFollowStatus("demo", "token-1")).rejects.toThrow(
+      "nope",
+    );
   });
 });
 

@@ -1,27 +1,47 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { signOut } from "next-auth/react";
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { searchUsers, type UserProfilePublic } from "@/lib/api/users";
-import { buildImageUrl } from "@/lib/image";
+import type { ComponentType } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import {
+  BrandMarkIcon,
+  CreateIcon,
+  HomeIcon,
+  LogOutIcon,
+  SearchIcon,
+  UserIcon,
+} from "@/components/ui/icons";
+import {
+  isPathActive,
+  resolveProfileHref,
+  shouldCloseSearch,
+} from "@/components/ui/navbar-helpers";
+
+const NavSearchLayer = dynamic(
+  () =>
+    import("@/components/ui/navbar-search-layer").then(
+      (module) => module.NavSearchLayer,
+    ),
+  {
+    ssr: false,
+  },
+);
 
 type NavItem = {
   href: string;
   label: string;
-  icon: string;
+  Icon: ComponentType<{ className?: string }>;
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/", label: "Home", icon: "🏠" },
-  { href: "/search", label: "Search", icon: "🔍" },
-  { href: "/posts/new", label: "Create", icon: "➕" },
-  { href: "/profile", label: "Profile", icon: "👤" },
+  { href: "/", label: "Accueil", Icon: HomeIcon },
+  { href: "/search", label: "Rechercher", Icon: SearchIcon },
+  { href: "/posts/new", label: "Créer", Icon: CreateIcon },
+  { href: "/profile", label: "Profil", Icon: UserIcon },
 ];
-
-const SEARCH_RESULT_SKELETON_KEYS = ["slot-1", "slot-2", "slot-3"] as const;
 
 type NavBarProps = {
   username?: string;
@@ -30,293 +50,232 @@ type NavBarProps = {
 export function NavBar({ username }: NavBarProps) {
   const pathname = usePathname();
   const [isSearching, setIsSearching] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<UserProfilePublic[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const previousPathnameRef = useRef(pathname);
+
+  const handleCloseSearch = useCallback(() => {
+    setIsSearching(false);
+  }, []);
 
   useEffect(() => {
-    if (isSearching) {
-      const focusTimer = setTimeout(() => {
-        searchInputRef.current?.focus();
-      }, 10);
-      return () => clearTimeout(focusTimer);
+    if (shouldCloseSearch(previousPathnameRef.current, pathname)) {
+      handleCloseSearch();
+      previousPathnameRef.current = pathname;
     }
-    setSearchQuery("");
-    setSearchResults([]);
-    setSearchError(null);
-    setIsLoading(false);
-  }, [isSearching]);
-
-  useEffect(() => {
-    if (!isSearching) {
-      return;
-    }
-
-    const trimmedQuery = searchQuery.trim();
-    if (trimmedQuery.length === 0) {
-      setSearchResults([]);
-      setIsLoading(false);
-      setSearchError(null);
-      return;
-    }
-
-    setIsLoading(true);
-    setSearchError(null);
-    setSearchResults([]);
-
-    const controller = new AbortController();
-    const debounceTimer = setTimeout(() => {
-      searchUsers(trimmedQuery, {
-        limit: 5,
-        signal: controller.signal,
-      })
-        .then((results) => {
-          setSearchResults(results);
-          setIsLoading(false);
-        })
-        .catch((error) => {
-          if (error instanceof Error && error.name === "AbortError") {
-            return;
-          }
-          console.error("Failed to search users", error);
-          setSearchError("Impossible de charger les résultats.");
-          setIsLoading(false);
-        });
-    }, 200);
-
-    return () => {
-      controller.abort();
-      clearTimeout(debounceTimer);
-    };
-  }, [isSearching, searchQuery]);
+  }, [handleCloseSearch, pathname]);
 
   const handleOpenSearch = () => {
     setIsSearching(true);
-  };
-
-  const handleCloseSearch = () => {
-    setIsSearching(false);
-  };
-
-  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      handleCloseSearch();
-    }
   };
 
   const handleLogout = async () => {
     if (isLoggingOut) {
       return;
     }
+
     setIsLoggingOut(true);
     try {
       const response = await fetch("/api/logout", {
         method: "POST",
         credentials: "include",
       });
+
+      let detail: string | null = null;
+      let revoked: boolean | null = null;
+      try {
+        const payload = (await response.json()) as {
+          revoked?: boolean;
+          detail?: string | null;
+        };
+        detail = typeof payload.detail === "string" ? payload.detail : null;
+        revoked = payload.revoked === true;
+      } catch {
+        revoked = null;
+      }
+
       if (!response.ok) {
-        console.error("Logout endpoint responded with", response.status);
+        console.error(
+          "Logout endpoint responded with failure",
+          response.status,
+          detail ?? null,
+        );
+      } else if (revoked === false) {
+        console.warn(
+          "Local logout completed, backend token revoke did not complete",
+        );
       }
     } catch (error) {
       console.error("Failed to call logout endpoint", error);
     } finally {
+      const { signOut } = await import("next-auth/react");
       await signOut({ callbackUrl: "/login" });
       setIsLoggingOut(false);
     }
   };
 
-  const hasSearchValue = searchQuery.trim().length > 0;
   const viewerName = username ?? "invité";
 
   return (
-    <aside className="sticky top-0 flex h-screen w-56 flex-col border-r border-zinc-800 bg-zinc-950 p-6 text-zinc-100">
-      <div className="mb-8 text-2xl font-semibold">MyStagram</div>
+    <>
+      <aside className="ui-surface-nav relative hidden h-screen w-72 shrink-0 flex-col border-r ui-border p-6 text-zinc-100 lg:sticky lg:top-0 lg:flex">
+        <Link
+          href="/"
+          className="mb-8 inline-flex items-center gap-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
+        >
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-sky-500/15 text-sky-400">
+            <BrandMarkIcon className="h-5 w-5" />
+          </span>
+          <div>
+            <p className="text-lg font-semibold tracking-tight">MyStagram</p>
+            <p className="ui-text-muted text-xs">Votre communauté visuelle</p>
+          </div>
+        </Link>
 
-      <nav className="flex-1 space-y-2">
-        {NAV_ITEMS.map((item) => {
-          if (item.href === "/search") {
-            if (isSearching) {
+        <nav className="flex-1 space-y-1.5">
+          {NAV_ITEMS.map((item) => {
+            const href = resolveProfileHref(item.href, username);
+            const isActive = isPathActive(pathname, href);
+
+            if (item.href === "/search") {
               return (
-                <div
-                  key="search-input"
-                  className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-200 shadow-sm"
+                <button
+                  key="desktop-search-button"
+                  type="button"
+                  onClick={handleOpenSearch}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm transition ${
+                    isSearching
+                      ? "bg-sky-500/15 text-sky-200"
+                      : "text-zinc-300 ui-hover-surface"
+                  }`}
                 >
-                  <span aria-hidden>🔍</span>
-                  <input
-                    ref={searchInputRef}
-                    type="search"
-                    name="navbar-search"
-                    placeholder="Rechercher un utilisateur"
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    onKeyDown={handleSearchKeyDown}
-                    className="w-full bg-transparent text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
-                    aria-label="Rechercher des utilisateurs"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCloseSearch}
-                    className="rounded-md p-1 text-zinc-400 transition hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
-                    aria-label="Fermer la recherche"
-                  >
-                    ✕
-                  </button>
-                </div>
+                  <item.Icon className="h-5 w-5 shrink-0" />
+                  <span className="font-medium">{item.label}</span>
+                </button>
               );
             }
 
             return (
-              <button
-                key="search-button"
-                type="button"
-                onClick={handleOpenSearch}
-                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm transition ${
-                  isSearching
-                    ? "bg-zinc-800 font-semibold"
-                    : "text-zinc-300 hover:bg-zinc-900"
+              <Link
+                key={item.label}
+                href={href}
+                className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition ${
+                  isActive
+                    ? "bg-sky-500/15 font-semibold text-sky-200"
+                    : "text-zinc-300 ui-hover-surface"
                 }`}
               >
-                <span aria-hidden>{item.icon}</span>
-                {item.label}
-              </button>
+                <item.Icon className="h-5 w-5 shrink-0" />
+                <span>{item.label}</span>
+              </Link>
             );
-          }
+          })}
+        </nav>
 
-          const href =
-            item.href === "/profile" && username
-              ? `/users/${encodeURIComponent(username)}`
-              : item.href;
-          const isActive = pathname === href || pathname.startsWith(`${href}/`);
-          return (
-            <Link
-              key={item.label}
-              href={href}
-              className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition ${
-                isActive
-                  ? "bg-zinc-800 font-semibold"
-                  : "text-zinc-300 hover:bg-zinc-900"
-              }`}
-            >
-              <span aria-hidden>{item.icon}</span>
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      {isSearching ? (
-        <div className="absolute left-full top-28 ml-5 w-80 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-4 text-sm text-zinc-200 shadow-2xl backdrop-blur">
-          <div className="flex items-center justify-between text-xs uppercase tracking-wide text-zinc-500">
-            <span>Résultats</span>
-            {isLoading ? (
-              <span className="text-[11px] text-zinc-400">Chargement…</span>
-            ) : null}
+        <footer className="ui-surface-card mt-auto rounded-2xl border ui-border p-3 text-sm text-zinc-200">
+          <div className="flex items-center gap-3">
+            <div className="ui-surface-muted flex h-10 w-10 items-center justify-center rounded-full text-zinc-200">
+              <UserIcon className="h-5 w-5" />
+            </div>
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <span className="truncate text-sm font-medium">{viewerName}</span>
+              {username ? (
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  disabled={isLoggingOut}
+                  className="ui-text-muted ml-auto rounded-full border border-transparent p-1.5 transition hover:border-[color:var(--ui-border-strong)] hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)] disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label="Se déconnecter"
+                  title="Se déconnecter"
+                >
+                  <LogOutIcon className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
           </div>
-          <div
-            aria-live="polite"
-            className="mt-3 max-h-[70vh] space-y-2 overflow-y-auto"
+        </footer>
+      </aside>
+
+      <header className="ui-surface-nav sticky top-0 z-30 border-b ui-border backdrop-blur lg:hidden">
+        <div className="mx-auto flex h-16 w-full max-w-3xl items-center justify-between px-4">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
           >
-            {searchError ? (
-              <p className="rounded-lg bg-red-950/30 px-3 py-2 text-sm text-red-300">
-                {searchError}
-              </p>
-            ) : !hasSearchValue ? (
-              <p className="rounded-lg bg-zinc-900/60 px-3 py-2 text-sm text-zinc-400">
-                Commencez à taper pour rechercher un utilisateur.
-              </p>
-            ) : searchResults.length === 0 && !isLoading ? (
-              <p className="rounded-lg bg-zinc-900/60 px-3 py-2 text-sm text-zinc-400">
-                Aucun utilisateur trouvé.
-              </p>
-            ) : (
-              searchResults.map((user) => {
-                const displayName = user.name ?? user.username;
-                const initials = displayName.slice(0, 2).toUpperCase();
-                const avatarUrl = user.avatar_key
-                  ? buildImageUrl(user.avatar_key)
-                  : null;
-
-                return (
-                  <Link
-                    key={user.id}
-                    href={`/users/${encodeURIComponent(user.username)}`}
-                    onClick={handleCloseSearch}
-                    className="flex items-center gap-3 rounded-xl border border-transparent px-3 py-2 transition hover:border-zinc-700 hover:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
-                  >
-                    <Avatar className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-zinc-800 bg-zinc-900 text-sm font-semibold">
-                      {avatarUrl ? (
-                        <AvatarImage
-                          src={avatarUrl}
-                          alt={`Avatar de ${displayName}`}
-                          width={40}
-                          height={40}
-                          className="h-full w-full object-cover"
-                          unoptimized
-                        />
-                      ) : (
-                        <AvatarFallback className="flex h-full w-full items-center justify-center bg-zinc-900 text-xs uppercase text-zinc-100">
-                          {initials}
-                        </AvatarFallback>
-                      )}
-                    </Avatar>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-zinc-100">
-                        @{user.username}
-                      </p>
-                      {user.name ? (
-                        <p className="truncate text-xs text-zinc-400">
-                          {user.name}
-                        </p>
-                      ) : null}
-                    </div>
-                  </Link>
-                );
-              })
-            )}
-            {isLoading && searchResults.length === 0 ? (
-              <div className="space-y-2">
-                {SEARCH_RESULT_SKELETON_KEYS.map((key) => (
-                  <div
-                    key={key}
-                    className="flex items-center gap-3 rounded-xl border border-transparent px-3 py-2"
-                  >
-                    <div className="h-10 w-10 animate-pulse rounded-full bg-zinc-800" />
-                    <div className="flex-1 space-y-2">
-                      <div className="h-2.5 w-24 animate-pulse rounded bg-zinc-800" />
-                      <div className="h-2 w-16 animate-pulse rounded bg-zinc-900" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      <footer className="mt-auto flex items-center gap-3 text-sm text-zinc-300">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-700 text-lg">
-          ☺
-        </div>
-        <div className="flex flex-1 items-center gap-2 overflow-hidden">
-          <span className="flex-1 truncate">{viewerName}</span>
-          {username ? (
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/15 text-sky-400">
+              <BrandMarkIcon className="h-4 w-4" />
+            </span>
+            <span className="text-base font-semibold tracking-tight text-zinc-100">
+              MyStagram
+            </span>
+          </Link>
+          <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={handleLogout}
-              disabled={isLoggingOut}
-              className="rounded-full border border-transparent p-1 text-zinc-400 transition hover:border-zinc-600 hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label="Se déconnecter"
-              title="Se déconnecter"
+              onClick={handleOpenSearch}
+              className="ui-text-muted ui-hover-surface rounded-full p-2 transition hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/70"
+              aria-label="Rechercher un utilisateur"
             >
-              <span aria-hidden>🚪</span>
+              <SearchIcon className="h-5 w-5" />
             </button>
-          ) : null}
+            {username ? (
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                className="ui-text-muted ui-hover-surface rounded-full p-2 transition hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-sky-500/70 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Se déconnecter"
+              >
+                <LogOutIcon className="h-5 w-5" />
+              </button>
+            ) : null}
+          </div>
         </div>
-      </footer>
-    </aside>
+      </header>
+
+      <nav className="ui-surface-nav fixed inset-x-0 bottom-0 z-30 border-t ui-border backdrop-blur lg:hidden">
+        <ul className="mx-auto grid w-full max-w-md grid-cols-4">
+          {NAV_ITEMS.map((item) => {
+            if (item.href === "/search") {
+              return (
+                <li key="mobile-search">
+                  <button
+                    type="button"
+                    onClick={handleOpenSearch}
+                    className={`flex w-full flex-col items-center gap-1 py-2.5 text-xs font-medium transition ${
+                      isSearching
+                        ? "text-sky-300"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    <item.Icon className="h-5 w-5" />
+                    <span>{item.label}</span>
+                  </button>
+                </li>
+              );
+            }
+
+            const href = resolveProfileHref(item.href, username);
+            const isActive = isPathActive(pathname, href);
+            return (
+              <li key={item.label}>
+                <Link
+                  href={href}
+                  className={`flex flex-col items-center gap-1 py-2.5 text-xs font-medium transition ${
+                    isActive
+                      ? "text-sky-300"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <item.Icon className="h-5 w-5" />
+                  <span>{item.label}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+
+      {isSearching ? <NavSearchLayer onClose={handleCloseSearch} /> : null}
+    </>
   );
 }

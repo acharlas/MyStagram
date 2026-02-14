@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import Request, Response
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from api.v1 import auth
 from models import RefreshToken, User
@@ -36,6 +37,28 @@ async def test_register_function_success(db_session):
     )
     response = await auth.register(payload, session=db_session)
     assert response.username == payload.username
+
+
+@pytest.mark.asyncio
+async def test_register_handles_unique_violation_on_commit(db_session, monkeypatch):
+    payload = auth.RegisterRequest(
+        username="race_register",
+        email="race_register@example.com",
+        password="Sup3rSecret!",
+    )
+
+    async def failing_commit() -> None:
+        raise IntegrityError(
+            "INSERT INTO users",
+            {"username": payload.username},
+            Exception("duplicate key value violates unique constraint"),
+        )
+
+    monkeypatch.setattr(db_session, "commit", failing_commit)
+
+    with pytest.raises(auth.HTTPException) as exc:
+        await auth.register(payload, session=db_session)
+    assert exc.value.status_code == 409
 
 
 @pytest.mark.asyncio

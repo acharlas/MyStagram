@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 from io import BytesIO
-from typing import Any, cast
+from typing import Annotated, Any, cast
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy import and_, case, delete, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from api.deps import get_current_user, get_db
-from api.v1.posts import collect_like_meta
 from core import settings
+from db.errors import is_unique_violation
 from models import Follow, Post, User
+from .pagination import MAX_PAGE_SIZE, set_next_offset_header
+from .post_views import collect_like_meta
 from services import (
     JPEG_CONTENT_TYPE,
     UploadTooLargeError,
@@ -26,6 +30,7 @@ from services import (
 )
 
 router = APIRouter(tags=["users"])
+MAX_PROFILE_NAME_LENGTH = 80
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -38,6 +43,26 @@ def _ilike(column: Any, pattern: str) -> ColumnElement[bool]:
 
 def _is_not_null(column: Any) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], column.isnot(None))
+
+
+def _desc(column: Any) -> Any:
+    return cast(Any, column).desc()
+
+
+def _upload_avatar_bytes(
+    object_key: str,
+    processed_bytes: bytes,
+    processed_content_type: str,
+) -> None:
+    client = get_minio_client()
+    ensure_bucket(client)
+    client.put_object(
+        settings.minio_bucket,
+        object_key,
+        data=BytesIO(processed_bytes),
+        length=len(processed_bytes),
+        content_type=processed_content_type or JPEG_CONTENT_TYPE,
+    )
 
 
 class UserProfilePublic(BaseModel):
@@ -60,6 +85,10 @@ class UserPostSummary(BaseModel):
     caption: str | None = None
     like_count: int = 0
     viewer_has_liked: bool = False
+
+
+class FollowStatusResponse(BaseModel):
+    is_following: bool
 
 
 @router.get("/users/search", response_model=list[UserProfilePublic])
@@ -133,10 +162,17 @@ async def update_me(
     updated = False
 
     if name is not None:
-        current_user.name = name or None
+        normalized_name = name.strip()
+        if len(normalized_name) > MAX_PROFILE_NAME_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Name must be at most {MAX_PROFILE_NAME_LENGTH} characters",
+            )
+        current_user.name = normalized_name or None
         updated = True
     if bio is not None:
-        current_user.bio = bio or None
+        normalized_bio = bio.strip()
+        current_user.bio = normalized_bio or None
         updated = True
 
     if avatar is not None:
@@ -155,15 +191,11 @@ async def update_me(
             ) from exc
 
         object_key = f"avatars/{uuid4().hex}.jpg"
-
-        client = get_minio_client()
-        ensure_bucket(client)
-        client.put_object(
-            settings.minio_bucket,
+        await asyncio.to_thread(
+            _upload_avatar_bytes,
             object_key,
-            data=BytesIO(processed_bytes),
-            length=len(processed_bytes),
-            content_type=processed_content_type or JPEG_CONTENT_TYPE,
+            processed_bytes,
+            processed_content_type,
         )
 
         current_user.avatar_key = object_key
@@ -180,6 +212,9 @@ async def update_me(
 @router.get("/users/{username}/posts", response_model=list[UserPostSummary])
 async def list_user_posts(
     username: str,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> list[UserPostSummary]:
@@ -202,12 +237,28 @@ async def list_user_posts(
 
     viewer_id = current_user.id
 
-    posts_result = await session.execute(
+    post_created_at = cast(Any, Post.created_at)
+    post_id_column = cast(Any, Post.id)
+    posts_query = (
         select(Post)
         .where(_eq(Post.author_id, author.id))
-        .order_by(Post.created_at.desc())  # type: ignore[attr-defined]
+        .order_by(
+            _desc(post_created_at),
+            _desc(post_id_column),
+        )
     )
+    if offset > 0:
+        posts_query = posts_query.offset(offset)
+    if limit is not None:
+        posts_query = posts_query.limit(limit + 1)
+
+    posts_result = await session.execute(posts_query)
     posts = posts_result.scalars().all()
+    if limit is not None:
+        has_more = len(posts) > limit
+        if has_more:
+            posts = posts[:limit]
+        set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
 
     post_ids = [post.id for post in posts if post.id is not None]
     like_counts, liked_set = await collect_like_meta(session, post_ids, viewer_id)
@@ -259,7 +310,13 @@ async def follow_user(
 
     follow = Follow(follower_id=current_user.id, followee_id=followee.id)
     session.add(follow)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        if is_unique_violation(exc):
+            return {"detail": "Already following"}
+        raise
     return {"detail": "Followed"}
 
 
@@ -290,9 +347,44 @@ async def unfollow_user(
     return {"detail": "Unfollowed"}
 
 
+@router.get("/users/{username}/follow-status", response_model=FollowStatusResponse)
+async def get_follow_status(
+    username: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> FollowStatusResponse:
+    result = await session.execute(select(User).where(_eq(User.username, username)))
+    target_user = result.scalar_one_or_none()
+    if target_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if current_user.id is None or target_user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User record missing identifier",
+        )
+
+    is_following = False
+    if current_user.id != target_user.id:
+        follow_result = await session.execute(
+            select(Follow)
+            .where(
+                _eq(Follow.follower_id, current_user.id),
+                _eq(Follow.followee_id, target_user.id),
+            )
+            .limit(1)
+        )
+        is_following = follow_result.scalar_one_or_none() is not None
+
+    return FollowStatusResponse(is_following=is_following)
+
+
 @router.get("/users/{username}/followers", response_model=list[UserProfilePublic])
 async def list_followers(
     username: str,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
 ) -> list[UserProfilePublic]:
     result = await session.execute(select(User).where(_eq(User.username, username)))
@@ -310,16 +402,30 @@ async def list_followers(
         select(User)
         .join(Follow, _eq(Follow.follower_id, User.id))
         .where(_eq(Follow.followee_id, target_user.id))
-        .order_by(User.username)
+        .order_by(User.username, User.id)
     )
+    if offset > 0:
+        followers_query = followers_query.offset(offset)
+    if limit is not None:
+        followers_query = followers_query.limit(limit + 1)
+
     followers_result = await session.execute(followers_query)
     followers = followers_result.scalars().all()
+    if limit is not None:
+        has_more = len(followers) > limit
+        if has_more:
+            followers = followers[:limit]
+        set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
     return [UserProfilePublic.model_validate(user) for user in followers]
 
 
 @router.get("/users/{username}/following", response_model=list[UserProfilePublic])
 async def list_following(
     username: str,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
 ) -> list[UserProfilePublic]:
     result = await session.execute(select(User).where(_eq(User.username, username)))
@@ -337,8 +443,19 @@ async def list_following(
         select(User)
         .join(Follow, _eq(Follow.followee_id, User.id))
         .where(_eq(Follow.follower_id, target_user.id))
-        .order_by(User.username)
+        .order_by(User.username, User.id)
     )
+    if offset > 0:
+        following_query = following_query.offset(offset)
+    if limit is not None:
+        following_query = following_query.limit(limit + 1)
+
     following_result = await session.execute(following_query)
     following = following_result.scalars().all()
+    if limit is not None:
+        has_more = len(following) > limit
+        if has_more:
+            following = following[:limit]
+        set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
     return [UserProfilePublic.model_validate(user) for user in following]

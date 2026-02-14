@@ -45,8 +45,7 @@ export async function fetchPostDetail(
     if (error instanceof ApiError && error.status === 404) {
       return null;
     }
-    console.error("Failed to load post detail", error);
-    return null;
+    throw error;
   }
 }
 
@@ -72,8 +71,7 @@ export async function fetchPostComments(
     if (error instanceof ApiError && error.status === 404) {
       return [];
     }
-    console.error("Failed to load post comments", error);
-    return [];
+    throw error;
   }
 }
 
@@ -85,9 +83,9 @@ type LikeMutationResponse = {
 export async function likePostRequest(
   postId: string,
   accessToken?: string,
-): Promise<number | null> {
+): Promise<number> {
   if (!accessToken) {
-    accessToken = undefined;
+    throw new ApiError(401, "Not authenticated");
   }
 
   try {
@@ -103,19 +101,25 @@ export async function likePostRequest(
           : undefined,
       },
     );
-    return typeof payload.like_count === "number" ? payload.like_count : null;
+    if (typeof payload.like_count === "number") {
+      return payload.like_count;
+    }
+    throw new ApiError(502, "Backend response is missing like count");
   } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
     console.error("Failed to like post", error);
-    return null;
+    throw new ApiError(500, "Unable to like post");
   }
 }
 
 export async function unlikePostRequest(
   postId: string,
   accessToken?: string,
-): Promise<number | null> {
+): Promise<number> {
   if (!accessToken) {
-    accessToken = undefined;
+    throw new ApiError(401, "Not authenticated");
   }
 
   try {
@@ -131,10 +135,16 @@ export async function unlikePostRequest(
           : undefined,
       },
     );
-    return typeof payload.like_count === "number" ? payload.like_count : null;
+    if (typeof payload.like_count === "number") {
+      return payload.like_count;
+    }
+    throw new ApiError(502, "Backend response is missing like count");
   } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
     console.error("Failed to unlike post", error);
-    return null;
+    throw new ApiError(500, "Unable to unlike post");
   }
 }
 
@@ -142,9 +152,9 @@ export async function createPostComment(
   postId: string,
   text: string,
   accessToken?: string,
-): Promise<CreatedComment | null> {
+): Promise<CreatedComment> {
   if (!accessToken) {
-    accessToken = undefined;
+    throw new ApiError(401, "Not authenticated");
   }
 
   try {
@@ -165,7 +175,10 @@ export async function createPostComment(
       },
     );
   } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
     console.error("Failed to create comment", error);
-    return null;
+    throw new ApiError(500, "Unable to create comment");
   }
 }

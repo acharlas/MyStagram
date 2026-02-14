@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { useState } from "react";
 
+import { AuthShell } from "@/components/auth/auth-shell";
 import type { RegisterResult } from "../page";
 
 type RegisterFormProps = {
@@ -57,24 +58,15 @@ export function RegisterForm({ action }: RegisterFormProps) {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-zinc-950 px-6">
-      <form
-        className="w-full max-w-md space-y-6 rounded-xl border border-zinc-800 bg-zinc-900 p-8 shadow-lg"
-        onSubmit={handleSubmit}
-      >
-        <header className="space-y-1">
-          <h1 className="text-xl font-semibold text-zinc-100">
-            Créer un compte
-          </h1>
-          <p className="text-sm text-zinc-400">
-            Rejoignez mystagram et commencez à partager dès maintenant.
-          </p>
-        </header>
-
+    <AuthShell
+      title="Créer un compte"
+      subtitle="Rejoignez MyStagram et commencez à partager dès maintenant."
+    >
+      <form className="space-y-6" onSubmit={handleSubmit}>
         <div className="space-y-4">
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <label
-              className="block text-sm font-medium text-zinc-300"
+              className="ui-text-muted block text-sm font-medium"
               htmlFor="username"
             >
               Nom d&apos;utilisateur
@@ -85,15 +77,15 @@ export function RegisterForm({ action }: RegisterFormProps) {
               type="text"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
-              className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="ui-surface-input w-full rounded-xl border ui-border px-3 py-2.5 text-sm text-zinc-100 placeholder:text-[color:var(--ui-text-subtle)] focus:border-sky-500/70 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
               placeholder="Votre pseudo"
               required
             />
           </div>
 
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <label
-              className="block text-sm font-medium text-zinc-300"
+              className="ui-text-muted block text-sm font-medium"
               htmlFor="email"
             >
               Adresse e-mail
@@ -104,15 +96,15 @@ export function RegisterForm({ action }: RegisterFormProps) {
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="ui-surface-input w-full rounded-xl border ui-border px-3 py-2.5 text-sm text-zinc-100 placeholder:text-[color:var(--ui-text-subtle)] focus:border-sky-500/70 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
               placeholder="vous@example.com"
               required
             />
           </div>
 
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <label
-              className="block text-sm font-medium text-zinc-300"
+              className="ui-text-muted block text-sm font-medium"
               htmlFor="password"
             >
               Mot de passe
@@ -123,19 +115,23 @@ export function RegisterForm({ action }: RegisterFormProps) {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="ui-surface-input w-full rounded-xl border ui-border px-3 py-2.5 text-sm text-zinc-100 placeholder:text-[color:var(--ui-text-subtle)] focus:border-sky-500/70 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
               placeholder="Mot de passe sécurisé"
               required
             />
           </div>
         </div>
 
-        {error ? <p className="text-sm text-red-400">{error}</p> : null}
+        {error ? (
+          <p className="rounded-xl border border-red-800/60 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+            {error}
+          </p>
+        ) : null}
 
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full rounded-full bg-blue-600 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-full bg-sky-600 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isSubmitting ? "Inscription..." : "S'inscrire"}
         </button>
@@ -143,11 +139,11 @@ export function RegisterForm({ action }: RegisterFormProps) {
         <button
           type="button"
           onClick={() => router.push("/login")}
-          className="w-full rounded-full border border-zinc-700 py-2 text-sm font-semibold text-zinc-200 transition hover:bg-zinc-800"
+          className="ui-surface-input w-full rounded-full border ui-border py-2.5 text-sm font-semibold text-zinc-200 transition hover:border-[color:var(--ui-border-strong)] hover:bg-[color:var(--ui-surface-muted)]"
         >
           Vous avez déjà un compte ?
         </button>
       </form>
-    </main>
+    </AuthShell>
   );
 }
