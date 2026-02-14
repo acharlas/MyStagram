@@ -36,6 +36,14 @@ def _eq(column: Any, value: Any) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], column == value)
 
 
+def _desc(column: Any) -> Any:
+    return cast(Any, column).desc()
+
+
+def _asc(column: Any) -> Any:
+    return cast(Any, column).asc()
+
+
 def _upload_post_image(object_key: str, processed_bytes: bytes, content_type: str) -> None:
     client = get_minio_client()
     ensure_bucket(client)
@@ -183,8 +191,8 @@ async def list_posts(
         select(Post)
         .where(_eq(Post.author_id, viewer_id))
         .order_by(
-            Post.created_at.desc(),  # type: ignore[attr-defined]
-            Post.id.desc(),  # type: ignore[attr-defined]
+            _desc(cast(Any, Post.created_at)),
+            _desc(cast(Any, Post.id)),
         )
     )
     if offset > 0:
@@ -315,8 +323,8 @@ async def get_post_comments(
         .join(User, _eq(User.id, Comment.author_id))
         .where(_eq(Comment.post_id, post_id))
         .order_by(
-            Comment.created_at.asc(),  # type: ignore[attr-defined]
-            Comment.id.asc(),  # type: ignore[attr-defined]
+            _asc(cast(Any, Comment.created_at)),
+            _asc(cast(Any, Comment.id)),
         )
     )
     if offset > 0:

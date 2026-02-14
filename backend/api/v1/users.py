@@ -45,6 +45,10 @@ def _is_not_null(column: Any) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], column.isnot(None))
 
 
+def _desc(column: Any) -> Any:
+    return cast(Any, column).desc()
+
+
 def _upload_avatar_bytes(
     object_key: str,
     processed_bytes: bytes,
@@ -233,12 +237,14 @@ async def list_user_posts(
 
     viewer_id = current_user.id
 
+    post_created_at = cast(Any, Post.created_at)
+    post_id_column = cast(Any, Post.id)
     posts_query = (
         select(Post)
         .where(_eq(Post.author_id, author.id))
         .order_by(
-            Post.created_at.desc(),  # type: ignore[attr-defined]
-            Post.id.desc(),  # type: ignore[attr-defined]
+            _desc(post_created_at),
+            _desc(post_id_column),
         )
     )
     if offset > 0:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from collections.abc import Generator
 
 import pytest
 from fastapi import FastAPI
@@ -30,7 +31,7 @@ class InMemoryRedis:
 
 
 @pytest.fixture(autouse=True)
-def _ensure_rate_limit_proxy_secret() -> None:
+def _ensure_rate_limit_proxy_secret() -> Generator[None, None, None]:
     original = settings.rate_limit_proxy_secret
     if not original:
         settings.rate_limit_proxy_secret = "test-rate-limit-proxy-secret"

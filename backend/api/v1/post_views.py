@@ -18,6 +18,10 @@ def _eq(column: Any, value: Any) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], column == value)
 
 
+def _desc(column: Any) -> Any:
+    return cast(Any, column).desc()
+
+
 class PostResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -105,14 +109,16 @@ async def build_home_feed(
     post_entity = cast(Any, Post)
     author_name_column = cast(ColumnElement[str | None], User.name)
     author_username_column = cast(ColumnElement[str | None], User.username)
+    post_created_at = cast(Any, Post.created_at)
+    post_id_column = cast(Any, Post.id)
     query = (
         select(post_entity, author_name_column, author_username_column)
         .join(User, _eq(User.id, Post.author_id))
         .join(Follow, _eq(Follow.followee_id, Post.author_id))
         .where(_eq(Follow.follower_id, current_user.id))
         .order_by(
-            Post.created_at.desc(),  # type: ignore[attr-defined]
-            Post.id.desc(),  # type: ignore[attr-defined]
+            _desc(post_created_at),
+            _desc(post_id_column),
         )
     )
     if offset > 0:

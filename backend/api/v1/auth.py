@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timedelta, timezone
+from collections.abc import Sequence
 from typing import Any, Callable, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -44,8 +45,12 @@ def _normalize_email(value: str) -> str:
     return value.strip().lower()
 
 
+def _asc(column: Any) -> Any:
+    return cast(Any, column).asc()
+
+
 def _resolve_user_from_candidates(
-    candidates: list[User],
+    candidates: Sequence[User],
     *,
     password: str,
     preferred_identifier: str | None = None,
@@ -295,7 +300,7 @@ async def login(
         email_result = await session.execute(
             select(User)
             .where(_eq(lowered_email_column, lowered_identifier))
-            .order_by(User.created_at.asc(), User.id.asc())
+            .order_by(_asc(User.created_at), _asc(User.id))
         )
         user = _resolve_user_from_candidates(
             email_result.scalars().all(),
@@ -308,7 +313,7 @@ async def login(
             alias_result = await session.execute(
                 select(User)
                 .where(_eq(User.email_login_alias, lowered_identifier))
-                .order_by(User.created_at.asc(), User.id.asc())
+                .order_by(_asc(User.created_at), _asc(User.id))
             )
             user = _resolve_user_from_candidates(
                 alias_result.scalars().all(),
@@ -321,7 +326,7 @@ async def login(
             legacy_result = await session.execute(
                 select(User)
                 .where(_eq(func.lower(cast(Any, User.username)), lowered_identifier))
-                .order_by(User.created_at.asc(), User.id.asc())
+                .order_by(_asc(User.created_at), _asc(User.id))
             )
             user = _resolve_user_from_candidates(
                 legacy_result.scalars().all(),

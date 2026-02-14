@@ -535,6 +535,7 @@ async def test_like_post_handles_unique_violation_on_commit(
 
     monkeypatch.setattr(db_session, "commit", failing_commit)
 
+    assert post.id is not None
     result = await posts_api.like_post(post.id, session=db_session, current_user=viewer)
     assert result["detail"] == "Liked"
     assert isinstance(result["like_count"], int)
