@@ -1,16 +1,18 @@
 """Tests for notification dismissal persistence endpoints."""
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import delete, event, select
+from sqlalchemy import delete, event, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from models import Comment, DismissedNotification, Follow, Like, Post, User
+from services.notifications import dismissals as notification_dismissals
 
 
 def make_user_payload(prefix: str) -> dict[str, str]:
@@ -104,6 +106,36 @@ async def test_dismiss_notification_is_persisted_and_idempotent(
 
 
 @pytest.mark.asyncio
+async def test_dismiss_notification_is_idempotent_under_concurrency(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    payload = make_user_payload("notif_concurrency")
+    await register_and_login(async_client, payload)
+
+    response_one, response_two = await asyncio.gather(
+        async_client.post(
+            "/api/v1/notifications/dismissed",
+            json={"notification_id": "comment-99-9"},
+        ),
+        async_client.post(
+            "/api/v1/notifications/dismissed",
+            json={"notification_id": "comment-99-9"},
+        ),
+    )
+    assert response_one.status_code == 200
+    assert response_two.status_code == 200
+
+    result = await db_session.execute(
+        select(DismissedNotification).where(
+            _eq(DismissedNotification.notification_id, "comment-99-9")
+        )
+    )
+    stored = result.scalars().all()
+    assert len(stored) == 1
+
+
+@pytest.mark.asyncio
 async def test_dismissed_notifications_are_user_scoped(
     async_client: AsyncClient,
 ) -> None:
@@ -149,6 +181,263 @@ async def test_dismiss_notification_rejects_blank_identifier(
 
     assert response.status_code == 422
     assert response.json()["detail"] == "notification_id must not be empty"
+
+
+@pytest.mark.asyncio
+async def test_dismiss_notification_rejects_invalid_identifier_format(
+    async_client: AsyncClient,
+) -> None:
+    payload = make_user_payload("notif_invalid")
+    await register_and_login(async_client, payload)
+
+    response = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": "invalid-id"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "notification_id format is invalid"
+
+
+@pytest.mark.asyncio
+async def test_dismiss_notification_rejects_malformed_like_and_follow_identifiers(
+    async_client: AsyncClient,
+) -> None:
+    payload = make_user_payload("notif_malformed")
+    await register_and_login(async_client, payload)
+
+    malformed_ids = [
+        "like-1-not-a-uuid",
+        "follow-not-a-uuid",
+        "comment-1-not-a-number",
+    ]
+    for notification_id in malformed_ids:
+        response = await async_client.post(
+            "/api/v1/notifications/dismissed",
+            json={"notification_id": notification_id},
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"] == "notification_id format is invalid"
+
+
+@pytest.mark.asyncio
+async def test_dismissed_notifications_are_capped_per_user(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = make_user_payload("notif_cap")
+    await register_and_login(async_client, payload)
+
+    cap = 5
+    monkeypatch.setattr(
+        notification_dismissals,
+        "MAX_DISMISSED_NOTIFICATIONS",
+        cap,
+    )
+
+    posted_ids = [f"comment-1-{idx + 1}" for idx in range(cap + 3)]
+    for notification_id in posted_ids:
+        response = await async_client.post(
+            "/api/v1/notifications/dismissed",
+            json={"notification_id": notification_id},
+        )
+        assert response.status_code == 200
+
+    listed = await async_client.get("/api/v1/notifications/dismissed")
+    assert listed.status_code == 200
+    listed_ids = listed.json()["notification_ids"]
+    assert len(listed_ids) == cap
+    assert set(listed_ids) == set(posted_ids[-cap:])
+
+
+@pytest.mark.asyncio
+async def test_dismissed_notifications_pruning_handles_large_backlog_without_errors(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = make_user_payload("notif_backlog")
+    await register_and_login(async_client, payload)
+
+    cap = 20
+    monkeypatch.setattr(
+        notification_dismissals,
+        "MAX_DISMISSED_NOTIFICATIONS",
+        cap,
+    )
+    monkeypatch.setattr(
+        notification_dismissals,
+        "PRUNE_BATCH_SIZE",
+        7,
+    )
+
+    for idx in range(90):
+        response = await async_client.post(
+            "/api/v1/notifications/dismissed",
+            json={"notification_id": f"comment-2-{idx + 1}"},
+        )
+        assert response.status_code == 200
+
+    listed = await async_client.get("/api/v1/notifications/dismissed")
+    assert listed.status_code == 200
+    listed_ids = listed.json()["notification_ids"]
+    assert len(listed_ids) == cap
+    expected_ids = {f"comment-2-{idx + 1}" for idx in range(90 - cap, 90)}
+    assert set(listed_ids) == expected_ids
+
+
+@pytest.mark.asyncio
+async def test_dismissed_notifications_request_path_pruning_is_bounded(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = make_user_payload("notif_bounded")
+    await register_and_login(async_client, payload)
+    owner = await get_user_by_username(db_session, payload["username"])
+
+    cap = 5
+    prune_batch_size = 3
+    monkeypatch.setattr(
+        notification_dismissals,
+        "MAX_DISMISSED_NOTIFICATIONS",
+        cap,
+    )
+    monkeypatch.setattr(
+        notification_dismissals,
+        "PRUNE_BATCH_SIZE",
+        prune_batch_size,
+    )
+
+    base_time = datetime(2026, 2, 14, 20, 0, 0, tzinfo=timezone.utc)
+    for idx in range(20):
+        db_session.add(
+            DismissedNotification(
+                user_id=owner.id,
+                notification_id=f"comment-3-{idx + 1}",
+                dismissed_at=base_time + timedelta(seconds=idx),
+            )
+        )
+    await db_session.commit()
+
+    bind = db_session.bind
+    assert isinstance(bind, AsyncEngine)
+    bounded_query_count = 0
+
+    def _before_cursor_execute(
+        conn: object,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,
+    ) -> None:
+        del conn, cursor, parameters, context, executemany
+        nonlocal bounded_query_count
+        normalized = statement.lstrip().lower()
+        if "dismissed_notifications" in normalized:
+            bounded_query_count += 1
+
+    event.listen(bind.sync_engine, "before_cursor_execute", _before_cursor_execute)
+    try:
+        response = await async_client.post(
+            "/api/v1/notifications/dismissed",
+            json={"notification_id": "comment-3-21"},
+        )
+    finally:
+        event.remove(bind.sync_engine, "before_cursor_execute", _before_cursor_execute)
+
+    assert response.status_code == 200
+    assert bounded_query_count <= 8
+
+    count_result = await db_session.execute(
+        select(
+            cast(
+                Any,
+                func.count(cast(ColumnElement[int], DismissedNotification.id)),
+            )
+        ).where(
+            _eq(DismissedNotification.user_id, owner.id)
+        )
+    )
+    total = int(count_result.scalar_one() or 0)
+    assert total == 18
+
+
+@pytest.mark.asyncio
+async def test_maintenance_prune_reduces_user_backlog_to_cap(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    payload = make_user_payload("notif_maintenance")
+    await register_and_login(async_client, payload)
+    owner = await get_user_by_username(db_session, payload["username"])
+
+    base_time = datetime(2026, 2, 14, 21, 0, 0, tzinfo=timezone.utc)
+    for idx in range(25):
+        db_session.add(
+            DismissedNotification(
+                user_id=owner.id,
+                notification_id=f"comment-4-{idx + 1}",
+                dismissed_at=base_time + timedelta(seconds=idx),
+            )
+        )
+    await db_session.commit()
+
+    deleted_rows = await notification_dismissals.prune_dismissed_notifications_for_user(
+        db_session,
+        owner.id,
+        keep_limit=7,
+        batch_size=4,
+    )
+    assert deleted_rows == 18
+
+    listed = await async_client.get("/api/v1/notifications/dismissed?limit=30")
+    assert listed.status_code == 200
+    listed_ids = listed.json()["notification_ids"]
+    assert len(listed_ids) == 7
+    expected = [f"comment-4-{idx + 1}" for idx in range(25 - 7, 25)]
+    assert set(listed_ids) == set(expected)
+
+
+@pytest.mark.asyncio
+async def test_maintenance_prune_respects_max_deleted_budget(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    payload = make_user_payload("notif_budget")
+    await register_and_login(async_client, payload)
+    owner = await get_user_by_username(db_session, payload["username"])
+
+    base_time = datetime(2026, 2, 14, 21, 30, 0, tzinfo=timezone.utc)
+    for idx in range(25):
+        db_session.add(
+            DismissedNotification(
+                user_id=owner.id,
+                notification_id=f"comment-5-{idx + 1}",
+                dismissed_at=base_time + timedelta(seconds=idx),
+            )
+        )
+    await db_session.commit()
+
+    deleted_rows = await notification_dismissals.prune_dismissed_notifications_for_user(
+        db_session,
+        owner.id,
+        keep_limit=7,
+        batch_size=10,
+        max_deleted=5,
+    )
+    assert deleted_rows == 5
+
+    count_result = await db_session.execute(
+        select(
+            cast(
+                Any,
+                func.count(cast(ColumnElement[int], DismissedNotification.id)),
+            )
+        ).where(_eq(DismissedNotification.user_id, owner.id))
+    )
+    total = int(count_result.scalar_one() or 0)
+    assert total == 20
 
 
 @pytest.mark.asyncio
