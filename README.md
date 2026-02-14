@@ -52,7 +52,7 @@ JWT_SECRET=<random-string>
 ### `.env.frontend`
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_MINIO_BASE_URL=http://localhost:9000/instagram-media
+NEXT_PUBLIC_MINIO_BASE_URL=http://minio:9000/instagram-media
 NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=<random-string>
 ```
@@ -65,7 +65,6 @@ The sample values above are safe defaults for local development. Replace the pla
 
 1. **Install prerequisites**
    - Docker Desktop (or Docker Engine + Compose v2)
-   - Node.js 20+ (only required if you plan to run the frontend outside Docker)
 
 2. **Boot the stack**
    ```bash
@@ -102,25 +101,9 @@ The sample values above are safe defaults for local development. Replace the pla
 
 ---
 
-## Local Development Tips
+## Runtime Model
 
-- **Backend**
-  ```bash
-  cd backend
-  uv sync
-  uv run uvicorn main:app --reload
-  uv run pytest
-  ```
-
-- **Frontend**
-  ```bash
-  cd frontend
-  npm install
-  npm run dev
-  npm run test
-  ```
-
-Use the Docker services for database, Redis, and storage even when running backend/frontend locally.
+This project is Docker-only. Run backend and frontend through `docker compose`; direct host execution with `npm`, `uv`, or `python` is not a supported workflow.
 
 ---
 

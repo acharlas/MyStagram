@@ -9,7 +9,7 @@ type NextRemotePattern = Exclude<
 const nextConfig: NextConfig = (() => {
   const base =
     process.env.NEXT_PUBLIC_MINIO_BASE_URL ??
-    "http://localhost:9000/instagram-media";
+    "http://minio:9000/instagram-media";
   let images: NextConfig["images"] | undefined;
 
   try {
