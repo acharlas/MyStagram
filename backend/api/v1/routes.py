@@ -5,15 +5,17 @@ from datetime import datetime, timezone
 from fastapi import APIRouter
 
 from .auth import router as auth_router
-from .users import router as users_router
-from .posts import router as posts_router
 from .feed import router as feed_router
+from .notifications import router as notifications_router
+from .posts import router as posts_router
+from .users import router as users_router
 
 router = APIRouter(tags=["v1"])
 router.include_router(auth_router)
 router.include_router(users_router)
 router.include_router(posts_router)
 router.include_router(feed_router)
+router.include_router(notifications_router)
 
 
 @router.get("/health", tags=["health"], summary="Readiness probe")

@@ -1,6 +1,7 @@
 """SQLModel models package."""
 
 from .comment import Comment
+from .dismissed_notification import DismissedNotification
 from .follow import Follow
 from .like import Like
 from .post import Post
@@ -13,5 +14,6 @@ __all__ = [
     "Post",
     "Like",
     "Comment",
+    "DismissedNotification",
     "RefreshToken",
 ]
