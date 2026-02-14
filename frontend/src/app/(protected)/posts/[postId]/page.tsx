@@ -46,7 +46,6 @@ export default async function PostDetailPage({ params }: PostPageProps) {
             priority
             className="object-cover"
             sizes="(max-width: 1024px) 100vw, 900px"
-            unoptimized
           />
         </div>
       </article>

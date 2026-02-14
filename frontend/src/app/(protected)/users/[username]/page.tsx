@@ -26,11 +26,11 @@ export default async function UserProfilePage({
   const { username } = await params;
   const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
+  const viewerUsername = session?.user?.username ?? null;
 
-  const [profile, posts] = await Promise.all([
-    fetchUserProfile(username, accessToken),
-    fetchUserPosts(username, accessToken),
-  ]);
+  const profilePromise = fetchUserProfile(username, accessToken);
+  const postsPromise = fetchUserPosts(username, accessToken);
+  const profile = await profilePromise;
 
   if (!profile) {
     notFound();
@@ -42,20 +42,25 @@ export default async function UserProfilePage({
   const avatarUrl = profile.avatar_key
     ? buildImageUrl(profile.avatar_key)
     : null;
-  const viewerUsername = session?.user?.username ?? null;
   const isOwnProfile = viewerUsername === profile.username;
 
   let isFollowing = false;
-  if (!isOwnProfile && accessToken && viewerUsername) {
-    try {
-      isFollowing = await fetchUserFollowStatus(username, accessToken);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
-        notFound();
-      } else {
-        throw error;
-      }
+  const followStatusPromise =
+    !isOwnProfile && accessToken && viewerUsername
+      ? fetchUserFollowStatus(username, accessToken)
+      : Promise.resolve(false);
+
+  let posts = [] as Awaited<ReturnType<typeof fetchUserPosts>>;
+  try {
+    [posts, isFollowing] = await Promise.all([
+      postsPromise,
+      followStatusPromise,
+    ]);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      notFound();
     }
+    throw error;
   }
 
   return (
@@ -71,7 +76,6 @@ export default async function UserProfilePage({
                   width={96}
                   height={96}
                   className="h-full w-full object-cover"
-                  unoptimized
                 />
               ) : (
                 <AvatarFallback className="ui-surface-input flex h-full w-full items-center justify-center text-2xl font-semibold text-zinc-100">
@@ -141,7 +145,6 @@ export default async function UserProfilePage({
                   fill
                   className="object-cover transition duration-500 group-hover:scale-[1.03]"
                   sizes="(max-width: 768px) 50vw, 30vw"
-                  unoptimized
                 />
               </Link>
             );

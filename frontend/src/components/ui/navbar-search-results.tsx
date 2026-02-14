@@ -62,7 +62,6 @@ export function NavSearchResults({
                     width={40}
                     height={40}
                     className="h-full w-full object-cover"
-                    unoptimized
                   />
                 ) : (
                   <AvatarFallback className="ui-surface-input flex h-full w-full items-center justify-center text-xs uppercase text-zinc-100">

@@ -152,7 +152,6 @@ export default async function SettingsPage({
                   width={64}
                   height={64}
                   className="h-full w-full object-cover"
-                  unoptimized
                 />
               ) : (
                 <AvatarFallback className="ui-surface-input text-zinc-100">
