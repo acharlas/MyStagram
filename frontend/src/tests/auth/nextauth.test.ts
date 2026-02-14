@@ -457,7 +457,7 @@ describe("JWT and session callbacks", () => {
     });
   });
 
-  it("keeps session state on transient refresh failure", async () => {
+  it("invalidates session when refresh is transient but access token is already expired", async () => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
     const fetchMock = vi.fn().mockResolvedValue({
@@ -479,7 +479,35 @@ describe("JWT and session callbacks", () => {
     } as never);
 
     expect(jwt).toMatchObject({
-      accessToken: expiredAccessToken,
+      accessToken: undefined,
+      refreshToken: undefined,
+      error: "RefreshAccessTokenError",
+    });
+  });
+
+  it("keeps session state on transient refresh failure while access token is still valid", async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const almostExpiredAccessToken = buildJwtWithExp(nowSeconds + 2);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({ detail: "Too Many Requests" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const jwt = await authOptions.callbacks?.jwt?.({
+      token: {
+        userId: "user-id",
+        username: "string",
+        avatarUrl: "avatar-key",
+        accessToken: almostExpiredAccessToken,
+        refreshToken: "refresh-token-transient",
+        accessTokenExpires: (nowSeconds + 2) * 1000,
+      },
+    } as never);
+
+    expect(jwt).toMatchObject({
+      accessToken: almostExpiredAccessToken,
       refreshToken: "refresh-token-transient",
       error: undefined,
     });

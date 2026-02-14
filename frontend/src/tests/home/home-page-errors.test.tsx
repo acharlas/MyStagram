@@ -9,6 +9,14 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 
 vi.mock("@/lib/api/client", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+
+    constructor(status: number, message?: string) {
+      super(message);
+      this.status = status;
+    }
+  },
   apiServerFetch: apiServerFetchMock,
 }));
 

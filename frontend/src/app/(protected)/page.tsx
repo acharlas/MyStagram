@@ -1,25 +1,33 @@
 import Image from "next/image";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { LikeButton } from "@/components/post/LikeButton";
 import { CommentIcon } from "@/components/ui/icons";
-import { apiServerFetch } from "@/lib/api/client";
+import { ApiError, apiServerFetch } from "@/lib/api/client";
 import { getSessionServer } from "@/lib/auth/session";
 import { buildImageUrl } from "@/lib/image";
 import { sanitizeHtml } from "@/lib/sanitize";
 import type { FeedPost } from "@/types/feed";
 
-async function getHomeFeed(accessToken?: string): Promise<FeedPost[]> {
+async function getHomeFeed(accessToken?: string): Promise<FeedPost[] | null> {
   if (!accessToken) {
     return [];
   }
 
-  return apiServerFetch<FeedPost[]>("/api/v1/feed/home", {
-    cache: "no-store",
-    headers: {
-      Cookie: `access_token=${accessToken}`,
-    },
-  });
+  try {
+    return await apiServerFetch<FeedPost[]>("/api/v1/feed/home", {
+      cache: "no-store",
+      headers: {
+        Cookie: `access_token=${accessToken}`,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 function PostCard({ post }: { post: FeedPost }) {
@@ -107,18 +115,12 @@ export default async function ProtectedHomePage() {
   const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
   const posts = await getHomeFeed(accessToken);
+  if (posts === null) {
+    redirect("/login");
+  }
 
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-5 pb-6 pt-2">
-      <header className="ui-surface-card rounded-2xl border ui-border px-4 py-3 backdrop-blur">
-        <p className="ui-text-subtle text-xs uppercase tracking-[0.2em]">
-          Feed
-        </p>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight text-zinc-100">
-          Pour vous
-        </h1>
-      </header>
-
       {posts.length === 0 ? (
         <div className="ui-surface-card ui-text-muted rounded-2xl border ui-border p-6 text-center text-sm">
           <p>Le fil d&apos;actualité est vide pour le moment.</p>

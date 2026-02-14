@@ -86,6 +86,15 @@ def test_default_client_identifier_uses_refresh_cookie_when_access_missing() -> 
     assert default_client_identifier(request) == "user:user-refresh"
 
 
+def test_default_client_identifier_uses_refresh_token_fingerprint_for_refresh_path() -> None:
+    refresh_token = create_refresh_token("user-refresh")
+    request = _build_request(cookie_header=f"refresh_token={refresh_token}")
+    request.scope["path"] = "/api/v1/auth/refresh"
+    expected_digest = hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()[:24]
+
+    assert default_client_identifier(request) == f"refresh:{expected_digest}"
+
+
 def test_default_client_identifier_uses_bearer_token_when_no_cookie() -> None:
     access_token = create_access_token("user-bearer")
     request = _build_request(authorization=f"Bearer {access_token}")

@@ -30,6 +30,7 @@ class SupportsRateLimitClient(Protocol):
 ACCESS_COOKIE_NAME = "access_token"
 REFRESH_COOKIE_NAME = "refresh_token"
 SUPPORTED_TOKEN_TYPES = frozenset({"access", "refresh"})
+REFRESH_ENDPOINT_PATH = "/api/v1/auth/refresh"
 FORWARDED_CLIENT_KEY_HEADER = "x-rate-limit-client"
 FORWARDED_CLIENT_SIGNATURE_HEADER = "x-rate-limit-signature"
 FORWARDED_CLIENT_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
@@ -121,6 +122,16 @@ def _extract_authenticated_client_identifier(request: Request) -> str | None:
     return None
 
 
+def _refresh_token_fingerprint(request: Request) -> str | None:
+    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not refresh_token:
+        return None
+
+    digest = hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
+    # Keep Redis keys compact while still preserving enough entropy.
+    return f"refresh:{digest[:24]}"
+
+
 def _extract_forwarded_client_identifier(request: Request) -> str | None:
     proxy_secret = settings.rate_limit_proxy_secret.strip()
     if not proxy_secret:
@@ -168,6 +179,11 @@ def _is_trusted_proxy(remote_ip: IPv4Address | IPv6Address | None) -> bool:
 
 def default_client_identifier(request: Request) -> str:
     """Resolve a stable client identifier for rate limiting."""
+    if request.url.path == REFRESH_ENDPOINT_PATH:
+        refresh_fingerprint = _refresh_token_fingerprint(request)
+        if refresh_fingerprint is not None:
+            return refresh_fingerprint
+
     authenticated_identifier = _extract_authenticated_client_identifier(request)
     if authenticated_identifier is not None:
         return authenticated_identifier

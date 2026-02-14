@@ -85,6 +85,18 @@ function isTransientRefreshFailure(error: unknown): boolean {
   return error instanceof TypeError;
 }
 
+function hasStillValidAccessToken(
+  accessToken: string | undefined,
+  expiresAtMs: number,
+): boolean {
+  return (
+    typeof accessToken === "string" &&
+    accessToken.length > 0 &&
+    Number.isFinite(expiresAtMs) &&
+    expiresAtMs > Date.now()
+  );
+}
+
 async function refreshAccessToken(
   refreshToken: string,
 ): Promise<TokenResponse> {
@@ -306,7 +318,10 @@ export const authOptions: NextAuthOptions = {
         );
         token.error = undefined;
       } catch (error) {
-        if (isTransientRefreshFailure(error)) {
+        if (
+          isTransientRefreshFailure(error) &&
+          hasStillValidAccessToken(currentAccessToken, currentExpiry)
+        ) {
           console.warn(
             "Transient refresh failure; preserving session for retry",
             error,
