@@ -182,7 +182,7 @@ async def test_get_post_not_found(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_get_post_requires_follow_or_ownership(
+async def test_get_post_is_visible_to_any_authenticated_user(
     async_client: AsyncClient,
     db_session: AsyncSession,
 ):
@@ -217,12 +217,19 @@ async def test_get_post_requires_follow_or_ownership(
         "/api/v1/auth/login",
         json={"username": stranger_payload["username"], "password": stranger_payload["password"]},
     )
-    forbidden = await async_client.get(f"/api/v1/posts/{post.id}")
-    assert forbidden.status_code == 404
+    visible = await async_client.get(f"/api/v1/posts/{post.id}")
+    assert visible.status_code == 200
+    hidden_comment_create = await async_client.post(
+        f"/api/v1/posts/{post.id}/comments",
+        json={"text": "Hi"},
+    )
+    assert hidden_comment_create.status_code == 404
+    hidden_like_create = await async_client.post(f"/api/v1/posts/{post.id}/likes")
+    assert hidden_like_create.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_get_post_comments_requires_access(
+async def test_get_post_comments_are_visible_to_any_authenticated_user(
     async_client: AsyncClient,
     db_session: AsyncSession,
 ):
@@ -291,15 +298,15 @@ async def test_get_post_comments_requires_access(
     author_response = await async_client.get(f"/api/v1/posts/{post.id}/comments")
     assert author_response.status_code == 200
 
-    # Unrelated user cannot view comments
+    # Unrelated authenticated user can still view comments
     outsider_payload = make_user_payload("outsider")
     await async_client.post("/api/v1/auth/register", json=outsider_payload)
     await async_client.post(
         "/api/v1/auth/login",
         json={"username": outsider_payload["username"], "password": outsider_payload["password"]},
     )
-    denied = await async_client.get(f"/api/v1/posts/{post.id}/comments")
-    assert denied.status_code == 404
+    visible = await async_client.get(f"/api/v1/posts/{post.id}/comments")
+    assert visible.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -344,18 +351,18 @@ async def test_create_comment_endpoint(
     assert comment is not None
     assert comment.text == "Merci!"
 
-    # outsider cannot comment
+    # outsider cannot comment without follow access
     outsider_payload = make_user_payload("outsider")
     await async_client.post("/api/v1/auth/register", json=outsider_payload)
     await async_client.post(
         "/api/v1/auth/login",
         json={"username": outsider_payload["username"], "password": outsider_payload["password"]},
     )
-    forbidden = await async_client.post(
+    forbidden_comment = await async_client.post(
         f"/api/v1/posts/{post.id}/comments",
         json={"text": "Hello"},
     )
-    assert forbidden.status_code == 404
+    assert forbidden_comment.status_code == 404
 
 
 @pytest.mark.asyncio

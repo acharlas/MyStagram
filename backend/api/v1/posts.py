@@ -18,7 +18,7 @@ from sqlalchemy.sql import ColumnElement
 from api.deps import get_current_user, get_db
 from core import settings
 from db.errors import is_unique_violation
-from models import Comment, Follow, Like, Post, User
+from models import Comment, Like, Post, User
 from .pagination import MAX_PAGE_SIZE, set_next_offset_header
 from .post_views import PostResponse, build_home_feed, collect_like_meta
 from services import (
@@ -28,6 +28,10 @@ from services import (
     get_minio_client,
     process_image_bytes,
     read_upload_file,
+)
+from services.post_policy import (
+    require_post_interaction_access,
+    require_post_view_access,
 )
 
 router = APIRouter(prefix="/posts", tags=["posts"])
@@ -103,22 +107,6 @@ async def _get_like_count(session: AsyncSession, post_id: int) -> int:
     )
     count = result.scalar_one()
     return int(count or 0)
-
-
-async def _user_can_view_post(
-    session: AsyncSession,
-    viewer_id: str,
-    author_id: str,
-) -> bool:
-    if viewer_id == author_id:
-        return True
-
-    result = await session.execute(
-        select(Follow)
-        .where(_eq(Follow.follower_id, viewer_id), _eq(Follow.followee_id, author_id))
-        .limit(1)
-    )
-    return result.scalar_one_or_none() is not None
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=PostResponse)
@@ -279,9 +267,11 @@ async def get_post(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
     post, author_name, author_username = row
-
-    if not await _user_can_view_post(session, viewer_id, post.author_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+    await require_post_view_access(
+        session,
+        viewer_id=viewer_id,
+        post_author_id=post.author_id,
+    )
 
     post_id_value = post.id
     like_count = 0
@@ -315,18 +305,11 @@ async def get_post_comments(
             detail="User record missing identifier",
         )
 
-    author_id_column = cast(ColumnElement[str], Post.author_id)
-    post_author = await session.execute(
-        select(author_id_column)
-        .where(_eq(Post.id, post_id))
-        .limit(1)
+    await require_post_view_access(
+        session,
+        viewer_id=viewer_id,
+        post_id=post_id,
     )
-    post_author_id = post_author.scalar_one_or_none()
-    if post_author_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-
-    if not await _user_can_view_post(session, viewer_id, post_author_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
     comment_entity = cast(Any, Comment)
     author_name_column = cast(ColumnElement[str | None], User.name)
@@ -381,18 +364,11 @@ async def create_comment(
             detail="User record missing identifier",
         )
 
-    author_id_column = cast(ColumnElement[str], Post.author_id)
-    post_author = await session.execute(
-        select(author_id_column)
-        .where(_eq(Post.id, post_id))
-        .limit(1)
+    await require_post_interaction_access(
+        session,
+        viewer_id=viewer_id,
+        post_id=post_id,
     )
-    post_author_id = post_author.scalar_one_or_none()
-    if post_author_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-
-    if not await _user_can_view_post(session, viewer_id, post_author_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
     comment = Comment(
         post_id=post_id,
@@ -431,18 +407,11 @@ async def like_post(
             detail="User record missing identifier",
         )
 
-    author_id_column = cast(ColumnElement[str], Post.author_id)
-    post_author = await session.execute(
-        select(author_id_column)
-        .where(_eq(Post.id, post_id))
-        .limit(1)
+    await require_post_interaction_access(
+        session,
+        viewer_id=viewer_id,
+        post_id=post_id,
     )
-    post_author_id = post_author.scalar_one_or_none()
-    if post_author_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-
-    if not await _user_can_view_post(session, viewer_id, post_author_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
     like_entity = cast(Any, Like)
     user_id_column = cast(ColumnElement[str], Like.user_id)
@@ -479,18 +448,11 @@ async def unlike_post(
             detail="User record missing identifier",
         )
 
-    author_id_column = cast(ColumnElement[str], Post.author_id)
-    post_author = await session.execute(
-        select(author_id_column)
-        .where(_eq(Post.id, post_id))
-        .limit(1)
+    await require_post_interaction_access(
+        session,
+        viewer_id=viewer_id,
+        post_id=post_id,
     )
-    post_author_id = post_author.scalar_one_or_none()
-    if post_author_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-
-    if not await _user_can_view_post(session, viewer_id, post_author_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
     like_entity = cast(Any, Like)
     user_id_column = cast(ColumnElement[str], Like.user_id)
