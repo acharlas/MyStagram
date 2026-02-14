@@ -1,9 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { ApiError, apiServerFetch } from "@/lib/api/client";
 import type { UserProfilePublic } from "@/lib/api/users";
+import { getSessionServer } from "@/lib/auth/session";
 
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 50;
@@ -29,7 +27,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json([]);
   }
 
-  const session = await getServerSession(authOptions);
+  const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
   if (!accessToken) {
     return NextResponse.json({ detail: "Not authenticated" }, { status: 401 });

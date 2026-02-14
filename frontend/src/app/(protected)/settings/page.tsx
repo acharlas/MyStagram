@@ -1,8 +1,6 @@
-import { getServerSession } from "next-auth";
-
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ApiError, apiServerFetch } from "@/lib/api/client";
+import { getSessionServer } from "@/lib/auth/session";
 import { buildImageUrl } from "@/lib/image";
 import { updateProfileAction } from "./actions";
 import { CharacterCountField } from "./CharacterCountField";
@@ -58,7 +56,7 @@ export default async function SettingsPage({
     : undefined;
   const errorParam = resolvedSearchParams?.error;
   const errorMessage = Array.isArray(errorParam) ? errorParam[0] : errorParam;
-  const session = await getServerSession(authOptions);
+  const session = await getSessionServer();
 
   if (!session) {
     return (

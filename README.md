@@ -46,8 +46,11 @@ REDIS_URL=redis://redis:6379/0
 MINIO_ENDPOINT=http://minio:9000
 MINIO_ACCESS_KEY=<your-minio-access-key>
 MINIO_SECRET_KEY=<your-minio-secret-key>
-JWT_SECRET=<random-string>
+SECRET_KEY=<random-string>
+ALLOW_INSECURE_HTTP_COOKIES=true
 ```
+
+`ALLOW_INSECURE_HTTP_COOKIES=true` is for local Docker HTTP only; keep it unset/false in staging and production.
 
 ### `.env.frontend`
 ```

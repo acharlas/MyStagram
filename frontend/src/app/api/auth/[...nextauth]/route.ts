@@ -347,8 +347,6 @@ export const authOptions: NextAuthOptions = {
             ? token.avatarUrl
             : null,
       };
-      session.accessToken =
-        typeof token.accessToken === "string" ? token.accessToken : undefined;
       session.error = typeof token.error === "string" ? token.error : undefined;
       return session;
     },

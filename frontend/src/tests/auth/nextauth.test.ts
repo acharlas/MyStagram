@@ -273,6 +273,42 @@ describe("getSessionServer", () => {
     expect(getter).toHaveBeenCalledWith(authModule.authOptions);
     expect(result).toBe(session);
   });
+
+  it("hydrates access token from JWT cookie for server callers", async () => {
+    const getter = vi.fn().mockResolvedValue({
+      user: {
+        id: "user-id",
+        username: "string",
+        avatarUrl: null,
+      },
+      expires: "2099-01-01T00:00:00.000Z",
+    });
+    const getJwtToken = vi.fn().mockResolvedValue({
+      accessToken: "server-access-token",
+    });
+    const readCookies = vi.fn().mockResolvedValue({
+      getAll: () => [
+        { name: "next-auth.session-token", value: "cookie-value" },
+      ],
+    });
+
+    const result = await getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+      },
+    );
+
+    expect(getJwtToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        secret: "test-secret",
+      }),
+    );
+    expect(result).toMatchObject({
+      accessToken: "server-access-token",
+    });
+  });
 });
 
 describe("JWT and session callbacks", () => {
@@ -314,8 +350,8 @@ describe("JWT and session callbacks", () => {
         username: "string",
         avatarUrl: "avatar-key",
       },
-      accessToken: "access-token",
     });
+    expect((session as Record<string, unknown>).accessToken).toBeUndefined();
     expect((session as Record<string, unknown>).refreshToken).toBeUndefined();
   });
 

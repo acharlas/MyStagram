@@ -24,6 +24,7 @@ COMMA_SEPARATED_FIELDS = frozenset(
 INSECURE_SECRET_KEY_VALUES = frozenset(
     {
         "mystagram-demo-secret",
+        "local-dev-secret-change-me",
         "change-me",
         "changeme",
         "<random-string>",
@@ -85,6 +86,10 @@ class Settings(BaseSettings):
     refresh_token_expire_minutes: int = Field(
         default=60 * 24 * 7, alias="REFRESH_TOKEN_EXPIRE_MINUTES"
     )
+    allow_insecure_http_cookies: bool = Field(
+        default=False,
+        alias="ALLOW_INSECURE_HTTP_COOKIES",
+    )
 
     cors_origins: CommaSeparatedList = Field(
         default_factory=lambda: ["http://localhost:3000"],
@@ -133,6 +138,10 @@ class Settings(BaseSettings):
 
         if app_env not in {"local", "test"} and secret in INSECURE_SECRET_KEY_VALUES:
             raise ValueError("SECRET_KEY uses an insecure placeholder value")
+        if self.allow_insecure_http_cookies and app_env not in {"local", "test"}:
+            raise ValueError(
+                "ALLOW_INSECURE_HTTP_COOKIES is only permitted for local/test environments"
+            )
         return self
 
     @classmethod

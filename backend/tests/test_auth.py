@@ -279,7 +279,7 @@ async def test_login_email_alias_still_authenticates_displaced_account(
 
 
 @pytest.mark.asyncio
-async def test_refresh_reuses_refresh_token(async_client, db_session: AsyncSession):
+async def test_refresh_rotates_refresh_token(async_client, db_session: AsyncSession):
     payload = build_payload()
     await async_client.post("/api/v1/auth/register", json=payload)
     login_response = await async_client.post(
@@ -294,14 +294,42 @@ async def test_refresh_reuses_refresh_token(async_client, db_session: AsyncSessi
     refresh_response = await async_client.post("/api/v1/auth/refresh")
     assert refresh_response.status_code == 200
     refreshed_token = refresh_response.json()["refresh_token"]
-    assert refreshed_token == old_refresh
+    assert refreshed_token != old_refresh
 
     hashed_old = hashlib.sha256(old_refresh.encode()).hexdigest()
-    result = await db_session.execute(
+    old_result = await db_session.execute(
         select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed_old))
     )
-    stored = result.scalar_one()
-    assert stored.revoked_at is None
+    old_stored = old_result.scalar_one()
+    assert old_stored.revoked_at is not None
+
+    hashed_new = hashlib.sha256(refreshed_token.encode()).hexdigest()
+    new_result = await db_session.execute(
+        select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed_new))
+    )
+    new_stored = new_result.scalar_one()
+    assert new_stored.revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_revoked_refresh_token(async_client):
+    payload = build_payload()
+    await async_client.post("/api/v1/auth/register", json=payload)
+    login_response = await async_client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": payload["username"],
+            "password": payload["password"],
+        },
+    )
+    old_refresh = login_response.json()["refresh_token"]
+
+    refresh_response = await async_client.post("/api/v1/auth/refresh")
+    assert refresh_response.status_code == 200
+
+    async_client.cookies.set("refresh_token", old_refresh)
+    second_refresh = await async_client.post("/api/v1/auth/refresh")
+    assert second_refresh.status_code == 401
 
 
 @pytest.mark.asyncio

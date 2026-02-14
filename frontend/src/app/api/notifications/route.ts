@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { ApiError, apiServerFetch } from "@/lib/api/client";
+import { getSessionServer } from "@/lib/auth/session";
 
 type NotificationItem = {
   id: string;
@@ -40,7 +38,7 @@ function buildAuthCookie(accessToken: string) {
 }
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
+  const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
 
   if (!accessToken) {
@@ -75,7 +73,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const session = await getServerSession(authOptions);
+  const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
 
   if (!accessToken) {

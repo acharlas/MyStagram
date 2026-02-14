@@ -2,9 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
-
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { getSessionServer } from "@/lib/auth/session";
 
 import {
   SETTINGS_ALLOWED_AVATAR_MIME_TYPES,
@@ -28,7 +26,7 @@ function redirectToSettingsError(message: string): never {
 }
 
 export async function updateProfileAction(formData: FormData): Promise<void> {
-  const session = await getServerSession(authOptions);
+  const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
   const sessionUser = session?.user as { username?: string } | undefined;
   const sessionUsername =

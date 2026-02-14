@@ -33,7 +33,10 @@ ACCESS_COOKIE = "access_token"
 REFRESH_COOKIE = "refresh_token"
 COOKIE_PATH = "/"
 COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
-COOKIE_SECURE = settings.app_env != "local"
+COOKIE_SECURE = (
+    settings.app_env.strip().lower() not in {"local", "test"}
+    and not settings.allow_insecure_http_cookies
+)
 MAX_ACTIVE_REFRESH_TOKENS = 5
 
 
@@ -414,12 +417,15 @@ async def refresh_tokens(
             detail="Invalid refresh token",
         )
 
-    # Keep refresh token stable to avoid multi-instance refresh races where
-    # different frontend nodes process the same valid refresh token in parallel.
+    now = datetime.now(timezone.utc)
+    token_obj.revoked_at = now
     access_token = create_access_token(str(user_id))
+    new_refresh_token = create_refresh_token(str(user_id))
+    await _store_refresh_token(session, user_id, new_refresh_token)
+    await session.commit()
 
-    _set_token_cookies(response, access_token, refresh_token)
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    _set_token_cookies(response, access_token, new_refresh_token)
+    return TokenResponse(access_token=access_token, refresh_token=new_refresh_token)
 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
