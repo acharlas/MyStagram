@@ -99,6 +99,18 @@ The sample values above are safe defaults for local development. Replace the pla
    ```
    Add `-v` to drop local volumes if you need a clean reset.
 
+Dismissed-notification backlog cleanup is launched in background at backend container startup.
+Set `DISMISSED_PRUNE_ON_STARTUP=false` in `.env.backend` to skip it.
+Startup prune is bounded by default:
+- `DISMISSED_MAX_USERS_PER_RUN=200`
+- `DISMISSED_MAX_ROWS_PER_RUN=5000`
+- `DISMISSED_MAX_ELAPSED_SECONDS=30`
+
+You can still run it manually:
+```bash
+docker compose exec backend uv run python scripts/prune_dismissed_notifications.py
+```
+
 ---
 
 ## Runtime Model
