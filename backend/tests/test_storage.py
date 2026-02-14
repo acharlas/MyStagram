@@ -82,3 +82,32 @@ def test_ensure_bucket_handles_existing_race(monkeypatch):
 
     client.bucket_exists.assert_called_once_with(storage.settings.minio_bucket)
     client.make_bucket.assert_called_once_with(storage.settings.minio_bucket)
+
+
+def test_delete_object_calls_remove_object():
+    client = MagicMock()
+
+    storage.delete_object("posts/demo.jpg", client)
+
+    client.remove_object.assert_called_once_with(
+        storage.settings.minio_bucket,
+        "posts/demo.jpg",
+    )
+
+
+def test_delete_object_ignores_missing_key_errors(monkeypatch):
+    class FakeS3Error(Exception):
+        def __init__(self, code):
+            super().__init__(code)
+            self.code = code
+
+    client = MagicMock()
+    client.remove_object.side_effect = FakeS3Error("NoSuchKey")
+    monkeypatch.setattr(storage, "S3Error", FakeS3Error)
+
+    storage.delete_object("posts/missing.jpg", client)
+
+    client.remove_object.assert_called_once_with(
+        storage.settings.minio_bucket,
+        "posts/missing.jpg",
+    )

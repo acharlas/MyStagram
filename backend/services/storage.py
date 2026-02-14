@@ -41,3 +41,14 @@ def ensure_bucket(client: Minio | None = None) -> None:
         allowed_codes = {"BucketAlreadyOwnedByYou", "BucketAlreadyExists"}
         if exc.code not in allowed_codes:
             raise
+
+
+def delete_object(object_key: str, client: Minio | None = None) -> None:
+    """Delete an object from the configured bucket when it exists."""
+    client = client or get_minio_client()
+    try:
+        client.remove_object(settings.minio_bucket, object_key)  # pragma: no cover - network call
+    except S3Error as exc:  # pragma: no cover - network call
+        allowed_codes = {"NoSuchKey", "NoSuchObject", "ResourceNotFound"}
+        if exc.code not in allowed_codes:
+            raise

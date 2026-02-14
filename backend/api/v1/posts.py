@@ -23,6 +23,7 @@ from .pagination import MAX_PAGE_SIZE, set_next_offset_header
 from .post_views import PostResponse, build_home_feed, collect_like_meta
 from services import (
     UploadTooLargeError,
+    delete_object,
     ensure_bucket,
     get_minio_client,
     process_image_bytes,
@@ -129,7 +130,7 @@ async def create_post(
 ) -> PostResponse:
     try:
         data = await read_upload_file(image, settings.upload_max_bytes)
-        processed_bytes, content_type = process_image_bytes(data)
+        processed_bytes, content_type = await asyncio.to_thread(process_image_bytes, data)
     except UploadTooLargeError as exc:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -161,7 +162,19 @@ async def create_post(
         caption=caption,
     )
     session.add(post)
-    await session.commit()
+    try:
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        try:
+            await asyncio.to_thread(delete_object, object_key)
+        except Exception:
+            # Best-effort cleanup to avoid orphaned media on failed commits.
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create post",
+        ) from exc
     await session.refresh(post)
     return PostResponse.from_post(
         post,

@@ -13,11 +13,12 @@ from .rate_limiter import (
     get_rate_limiter,
     set_rate_limiter,
 )
-from .storage import ensure_bucket, get_minio_client
+from .storage import delete_object, ensure_bucket, get_minio_client
 
 __all__ = [
     "get_minio_client",
     "ensure_bucket",
+    "delete_object",
     "process_image_bytes",
     "read_upload_file",
     "MAX_IMAGE_DIMENSION",

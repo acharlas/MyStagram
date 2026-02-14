@@ -23,6 +23,7 @@ from .post_views import collect_like_meta
 from services import (
     JPEG_CONTENT_TYPE,
     UploadTooLargeError,
+    delete_object,
     ensure_bucket,
     get_minio_client,
     process_image_bytes,
@@ -160,6 +161,7 @@ async def update_me(
 ) -> UserProfilePrivate:
     """Update the authenticated user's profile."""
     updated = False
+    uploaded_avatar_key: str | None = None
 
     if name is not None:
         normalized_name = name.strip()
@@ -178,7 +180,10 @@ async def update_me(
     if avatar is not None:
         try:
             data = await read_upload_file(avatar, settings.upload_max_bytes)
-            processed_bytes, processed_content_type = process_image_bytes(data)
+            processed_bytes, processed_content_type = await asyncio.to_thread(
+                process_image_bytes,
+                data,
+            )
         except UploadTooLargeError as exc:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -199,11 +204,25 @@ async def update_me(
         )
 
         current_user.avatar_key = object_key
+        uploaded_avatar_key = object_key
         updated = True
 
     if updated:
         session.add(current_user)
-        await session.commit()
+        try:
+            await session.commit()
+        except Exception as exc:
+            await session.rollback()
+            if uploaded_avatar_key is not None:
+                try:
+                    await asyncio.to_thread(delete_object, uploaded_avatar_key)
+                except Exception:
+                    # Best-effort cleanup to avoid orphaned media on failed commits.
+                    pass
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update profile",
+            ) from exc
         await session.refresh(current_user)
 
     return UserProfilePrivate.model_validate(current_user)

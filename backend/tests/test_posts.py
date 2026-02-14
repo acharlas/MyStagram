@@ -7,7 +7,7 @@ from typing import Any, cast
 from uuid import uuid4
 
 import pytest
-from fastapi import status
+from fastapi import HTTPException, UploadFile, status
 from httpx import AsyncClient
 from PIL import Image
 from sqlalchemy import select
@@ -103,6 +103,62 @@ async def test_create_and_get_post(
     assert len(listed) == 1
     assert listed[0]["like_count"] == 0
     assert listed[0]["viewer_has_liked"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_post_cleans_up_upload_when_commit_fails(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    user = User(
+        id="author-upload-fail",
+        username="author_upload_fail",
+        email="author_upload_fail@example.com",
+        password_hash="hash",
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    uploaded_keys: list[str] = []
+    deleted_keys: list[str] = []
+
+    class DummyMinio:
+        def bucket_exists(self, bucket_name: str) -> bool:
+            return True
+
+        def make_bucket(self, bucket_name: str) -> None:
+            return None
+
+        def put_object(self, bucket_name, object_name, data, length, content_type=None):
+            uploaded_keys.append(object_name)
+
+    dummy_client = DummyMinio()
+    monkeypatch.setattr(posts_api, "get_minio_client", lambda: dummy_client)
+    monkeypatch.setattr(posts_api, "ensure_bucket", lambda client=None: None)
+    monkeypatch.setattr(posts_api, "delete_object", lambda object_key: deleted_keys.append(object_key))
+
+    async def failing_commit() -> None:
+        raise IntegrityError(
+            "INSERT INTO posts",
+            {"author_id": user.id},
+            Exception("forced commit failure"),
+        )
+
+    monkeypatch.setattr(db_session, "commit", failing_commit)
+
+    upload = UploadFile(filename="photo.png", file=BytesIO(make_image_bytes()))
+    with pytest.raises(HTTPException) as exc_info:
+        await posts_api.create_post(
+            image=upload,
+            caption="should fail",
+            session=db_session,
+            current_user=user,
+        )
+
+    assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert len(uploaded_keys) == 1
+    assert deleted_keys == uploaded_keys
+    await upload.close()
 
 
 @pytest.mark.asyncio

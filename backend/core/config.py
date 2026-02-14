@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     )
 
     upload_max_bytes: int = Field(
-        default=5 * 1024 * 1024, alias="UPLOAD_MAX_BYTES"
+        default=2 * 1024 * 1024, alias="UPLOAD_MAX_BYTES"
     )
 
     minio_endpoint: str = Field(default="minio:9000", alias="MINIO_ENDPOINT")
