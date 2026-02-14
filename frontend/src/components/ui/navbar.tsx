@@ -52,6 +52,7 @@ type FollowRequest = {
   username: string;
   name: string;
   href: string;
+  occurred_at: string | null;
 };
 
 const DESKTOP_PRIMARY_ITEMS: NavItem[] = [
@@ -230,7 +231,7 @@ function InboxPanel({
                   <span className="ui-text-muted">@{request.username}</span>
                 </span>
                 <span className="ui-text-muted block text-xs">
-                  Abonné actuel
+                  {formatRelativeTime(request.occurred_at)}
                 </span>
               </span>
             </Link>
