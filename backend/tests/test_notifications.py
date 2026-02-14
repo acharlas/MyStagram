@@ -1,13 +1,16 @@
 """Tests for notification dismissal persistence endpoints."""
 
+from datetime import datetime, timedelta, timezone
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import ColumnElement
 
-from models import DismissedNotification
+from models import Comment, DismissedNotification, Follow, Like, Post, User
 
 
 def make_user_payload(prefix: str) -> dict[str, str]:
@@ -36,6 +39,20 @@ async def login(async_client: AsyncClient, payload: dict[str, str]) -> None:
         json={"username": payload["username"], "password": payload["password"]},
     )
     assert login_response.status_code == 200
+
+
+def _eq(column: Any, value: Any) -> ColumnElement[bool]:
+    return cast(ColumnElement[bool], column == value)
+
+
+async def get_user_by_username(
+    session: AsyncSession, username: str
+) -> User:
+    result = await session.execute(select(User).where(_eq(User.username, username)))
+    user = result.scalar_one()
+    if user.id is None:  # pragma: no cover - defensive
+        raise ValueError("User record missing identifier")
+    return user
 
 
 @pytest.mark.asyncio
@@ -116,3 +133,348 @@ async def test_dismissed_notifications_are_user_scoped(
     listed_one = await async_client.get("/api/v1/notifications/dismissed")
     assert listed_one.status_code == 200
     assert listed_one.json()["notification_ids"] == ["like-88"]
+
+
+@pytest.mark.asyncio
+async def test_notification_stream_requires_auth(async_client: AsyncClient) -> None:
+    response = await async_client.get("/api/v1/notifications/stream")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_notification_stream_includes_comment_like_and_follow_entries(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("stream_owner")
+    commenter_payload = make_user_payload("stream_commenter")
+    liker_payload = make_user_payload("stream_liker")
+    follower_payload = make_user_payload("stream_follower")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, commenter_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, liker_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, follower_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    commenter = await get_user_by_username(db_session, commenter_payload["username"])
+    liker = await get_user_by_username(db_session, liker_payload["username"])
+    follower = await get_user_by_username(db_session, follower_payload["username"])
+
+    base_time = datetime(2026, 2, 14, 10, 0, 0, tzinfo=timezone.utc)
+    post = Post(
+        author_id=owner.id,
+        image_key=f"posts/{owner.id}/stream.jpg",
+        caption="stream",
+        created_at=base_time,
+        updated_at=base_time,
+    )
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        raise ValueError("Post record missing identifier")
+
+    comment = Comment(
+        post_id=post.id,
+        author_id=commenter.id,
+        text="Salut",
+        created_at=base_time + timedelta(minutes=1),
+        updated_at=base_time + timedelta(minutes=1),
+    )
+    like = Like(
+        post_id=post.id,
+        user_id=liker.id,
+        created_at=base_time + timedelta(minutes=2),
+        updated_at=base_time + timedelta(minutes=2),
+    )
+    follow = Follow(
+        follower_id=follower.id,
+        followee_id=owner.id,
+        created_at=base_time + timedelta(minutes=3),
+        updated_at=base_time + timedelta(minutes=3),
+    )
+    db_session.add(comment)
+    db_session.add(like)
+    db_session.add(follow)
+    await db_session.commit()
+    await db_session.refresh(comment)
+    if comment.id is None:  # pragma: no cover - defensive
+        raise ValueError("Comment record missing identifier")
+
+    await login(async_client, owner_payload)
+    response = await async_client.get("/api/v1/notifications/stream")
+    assert response.status_code == 200
+    payload = response.json()
+
+    notifications = payload["notifications"]
+    follow_requests = payload["follow_requests"]
+
+    expected_comment_id = f"comment-{post.id}-{comment.id}"
+    expected_like_id = f"like-{post.id}-{liker.id}"
+    expected_follow_id = f"follow-{follower.id}"
+
+    assert any(
+        item["id"] == expected_comment_id and item["kind"] == "comment"
+        for item in notifications
+    )
+    assert any(
+        item["id"] == expected_like_id
+        and item["kind"] == "like"
+        and item["username"] == liker.username
+        for item in notifications
+    )
+    assert any(
+        item["id"] == expected_follow_id and item["username"] == follower.username
+        for item in follow_requests
+    )
+    assert payload["total_count"] == len(notifications) + len(follow_requests)
+
+
+@pytest.mark.asyncio
+async def test_like_notification_reappears_after_new_like_event(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("like_owner")
+    liker_payload = make_user_payload("like_actor")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, liker_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    liker = await get_user_by_username(db_session, liker_payload["username"])
+
+    post = Post(
+        author_id=owner.id,
+        image_key=f"posts/{owner.id}/like.jpg",
+        caption="like-test",
+    )
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        raise ValueError("Post record missing identifier")
+
+    first_like = Like(
+        post_id=post.id,
+        user_id=liker.id,
+    )
+    db_session.add(first_like)
+    await db_session.commit()
+
+    await login(async_client, owner_payload)
+    initial_stream = await async_client.get("/api/v1/notifications/stream")
+    assert initial_stream.status_code == 200
+    initial_payload = initial_stream.json()
+    notification_id = f"like-{post.id}-{liker.id}"
+    assert any(
+        item["id"] == notification_id and item["kind"] == "like"
+        for item in initial_payload["notifications"]
+    )
+
+    dismiss_response = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": notification_id},
+    )
+    assert dismiss_response.status_code == 200
+
+    after_dismiss = await async_client.get("/api/v1/notifications/stream")
+    assert after_dismiss.status_code == 200
+    assert all(
+        item["id"] != notification_id for item in after_dismiss.json()["notifications"]
+    )
+
+    await db_session.execute(
+        delete(Like).where(
+            _eq(Like.user_id, liker.id),
+            _eq(Like.post_id, post.id),
+        )
+    )
+    newer_like_time = datetime.now(tz=timezone.utc) + timedelta(minutes=1)
+    second_like = Like(
+        post_id=post.id,
+        user_id=liker.id,
+        created_at=newer_like_time,
+        updated_at=newer_like_time,
+    )
+    db_session.add(second_like)
+    await db_session.commit()
+
+    after_new_like = await async_client.get("/api/v1/notifications/stream")
+    assert after_new_like.status_code == 200
+    assert any(
+        item["id"] == notification_id and item["kind"] == "like"
+        for item in after_new_like.json()["notifications"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_backfills_when_newest_notifications_are_dismissed(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("backfill_owner")
+    commenter_payload = make_user_payload("backfill_commenter")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, commenter_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    commenter = await get_user_by_username(db_session, commenter_payload["username"])
+
+    base_time = datetime(2026, 2, 14, 12, 0, 0, tzinfo=timezone.utc)
+    post = Post(
+        author_id=owner.id,
+        image_key=f"posts/{owner.id}/backfill.jpg",
+        caption="backfill",
+        created_at=base_time,
+        updated_at=base_time,
+    )
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        raise ValueError("Post record missing identifier")
+
+    older = Comment(
+        post_id=post.id,
+        author_id=commenter.id,
+        text="older",
+        created_at=base_time + timedelta(minutes=1),
+        updated_at=base_time + timedelta(minutes=1),
+    )
+    newer = Comment(
+        post_id=post.id,
+        author_id=commenter.id,
+        text="newer",
+        created_at=base_time + timedelta(minutes=2),
+        updated_at=base_time + timedelta(minutes=2),
+    )
+    newest = Comment(
+        post_id=post.id,
+        author_id=commenter.id,
+        text="newest",
+        created_at=base_time + timedelta(minutes=3),
+        updated_at=base_time + timedelta(minutes=3),
+    )
+    db_session.add(older)
+    db_session.add(newer)
+    db_session.add(newest)
+    await db_session.commit()
+    await db_session.refresh(older)
+    await db_session.refresh(newer)
+    await db_session.refresh(newest)
+    if older.id is None or newer.id is None or newest.id is None:  # pragma: no cover - defensive
+        raise ValueError("Comment record missing identifier")
+
+    await login(async_client, owner_payload)
+    dismiss_newest = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": f"comment-{post.id}-{newest.id}"},
+    )
+    dismiss_newer = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": f"comment-{post.id}-{newer.id}"},
+    )
+    assert dismiss_newest.status_code == 200
+    assert dismiss_newer.status_code == 200
+
+    stream = await async_client.get("/api/v1/notifications/stream?limit=1")
+    assert stream.status_code == 200
+    payload = stream.json()
+    assert len(payload["notifications"]) == 1
+    notification = payload["notifications"][0]
+    assert notification["id"] == f"comment-{post.id}-{older.id}"
+    assert notification["kind"] == "comment"
+    assert notification["username"] == commenter.username
+    assert notification["message"] == "a commente votre publication"
+    assert notification["href"] == f"/posts/{post.id}"
+    assert notification["occurred_at"].startswith("2026-02-14T12:01:00")
+
+
+@pytest.mark.asyncio
+async def test_legacy_like_dismissal_id_remains_effective_for_new_like_ids(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("legacy_like_owner")
+    liker_payload = make_user_payload("legacy_like_actor")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, liker_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    liker = await get_user_by_username(db_session, liker_payload["username"])
+
+    now_utc = datetime.now(tz=timezone.utc)
+    base_time = now_utc - timedelta(minutes=10)
+    post = Post(
+        author_id=owner.id,
+        image_key=f"posts/{owner.id}/legacy-like.jpg",
+        caption="legacy-like",
+        created_at=base_time,
+        updated_at=base_time,
+    )
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        raise ValueError("Post record missing identifier")
+
+    initial_like_time = base_time + timedelta(minutes=1)
+    first_like = Like(
+        post_id=post.id,
+        user_id=liker.id,
+        created_at=initial_like_time,
+        updated_at=initial_like_time,
+    )
+    db_session.add(first_like)
+    await db_session.commit()
+
+    await login(async_client, owner_payload)
+    legacy_dismiss_response = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": f"like-{post.id}"},
+    )
+    assert legacy_dismiss_response.status_code == 200
+
+    hidden_stream = await async_client.get("/api/v1/notifications/stream")
+    assert hidden_stream.status_code == 200
+    assert all(
+        item["id"] != f"like-{post.id}-{liker.id}"
+        for item in hidden_stream.json()["notifications"]
+    )
+
+    await db_session.execute(
+        delete(Like).where(
+            _eq(Like.user_id, liker.id),
+            _eq(Like.post_id, post.id),
+        )
+    )
+    newer_like_time = now_utc + timedelta(minutes=1)
+    second_like = Like(
+        post_id=post.id,
+        user_id=liker.id,
+        created_at=newer_like_time,
+        updated_at=newer_like_time,
+    )
+    db_session.add(second_like)
+    await db_session.commit()
+
+    visible_stream = await async_client.get("/api/v1/notifications/stream")
+    assert visible_stream.status_code == 200
+    assert any(
+        item["id"] == f"like-{post.id}-{liker.id}" and item["kind"] == "like"
+        for item in visible_stream.json()["notifications"]
+    )
