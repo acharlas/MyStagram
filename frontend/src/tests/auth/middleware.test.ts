@@ -78,6 +78,42 @@ describe("middleware token expiry checks", () => {
     expect(response?.status).toBe(200);
   });
 
+  it("allows protected routes when only refresh token exists", async () => {
+    getTokenMock.mockResolvedValueOnce({
+      refreshToken: "refresh-token",
+    });
+
+    const response = await middleware(new NextRequest("http://localhost/"));
+
+    expect(response?.status).toBe(200);
+  });
+
+  it("redirects to login when token has terminal error", async () => {
+    getTokenMock.mockResolvedValueOnce({
+      refreshToken: "refresh-token",
+      error: "RefreshAccessTokenError",
+    });
+
+    const response = await middleware(new NextRequest("http://localhost/"));
+
+    expect(response?.status).toBe(307);
+    expect(response?.headers.get("location")).toContain("/login");
+  });
+
+  it("keeps login accessible when refresh token exists but access token is expired", async () => {
+    getTokenMock.mockResolvedValueOnce({
+      accessToken: "expired-token",
+      accessTokenExpires: Date.now() - 1_000,
+      refreshToken: "refresh-token",
+    });
+
+    const response = await middleware(
+      new NextRequest("http://localhost/login"),
+    );
+
+    expect(response?.status).toBe(200);
+  });
+
   it("redirects authenticated users away from login page", async () => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const validJwt = buildJwtWithExp(nowSeconds + 60);
@@ -88,6 +124,22 @@ describe("middleware token expiry checks", () => {
 
     const response = await middleware(
       new NextRequest("http://localhost/login"),
+    );
+
+    expect(response?.status).toBe(307);
+    expect(response?.headers.get("location")).toContain("/");
+  });
+
+  it("redirects authenticated users away from register page", async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const validJwt = buildJwtWithExp(nowSeconds + 60);
+    getTokenMock.mockResolvedValueOnce({
+      accessToken: validJwt,
+      accessTokenExpires: Date.now() + 60_000,
+    });
+
+    const response = await middleware(
+      new NextRequest("http://localhost/register"),
     );
 
     expect(response?.status).toBe(307);

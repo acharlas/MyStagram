@@ -1,12 +1,9 @@
-import { redirect } from "next/navigation";
-
 import {
   buildRateLimitClientKeyFromIdentifier,
   buildRateLimitClientSignature,
   RATE_LIMIT_CLIENT_HEADER,
   RATE_LIMIT_SIGNATURE_HEADER,
 } from "@/lib/auth/rate-limit-client";
-import { getSessionServer } from "@/lib/auth/session";
 
 import { RegisterForm } from "./_components/register-form";
 
@@ -83,10 +80,5 @@ export async function registerUser(
 }
 
 export default async function RegisterPage() {
-  const session = await getSessionServer();
-  if (session?.accessToken && !session.error) {
-    redirect("/");
-  }
-
   return <RegisterForm action={registerUser} />;
 }

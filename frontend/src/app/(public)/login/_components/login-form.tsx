@@ -5,12 +5,14 @@ import { signIn } from "next-auth/react";
 import { useState } from "react";
 
 import { AuthShell } from "@/components/auth/auth-shell";
+import { resolveSafeAuthRedirectTarget } from "@/lib/auth/redirect";
 
 export type CredentialsAuthenticator = typeof signIn;
 
 export async function authenticateCredentials(
   username: string,
   password: string,
+  callbackUrl: string,
   authenticator: CredentialsAuthenticator = signIn,
 ) {
   try {
@@ -18,11 +20,20 @@ export async function authenticateCredentials(
       username,
       password,
       redirect: false,
+      callbackUrl,
     });
 
-    return Boolean(response && !response.error);
+    if (!response || response.error || response.ok !== true) {
+      return null;
+    }
+
+    if (typeof response.url === "string" && response.url.length > 0) {
+      return response.url;
+    }
+
+    return callbackUrl;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -38,16 +49,22 @@ export function LoginForm() {
     setError(null);
     setIsSubmitting(true);
 
-    const success = await authenticateCredentials(username, password);
+    const params = new URLSearchParams(window.location.search);
+    const callbackUrl = resolveSafeAuthRedirectTarget(params.get("from"));
+    const redirectTo = await authenticateCredentials(
+      username,
+      password,
+      callbackUrl,
+    );
 
     setIsSubmitting(false);
 
-    if (!success) {
+    if (!redirectTo) {
       setError("Identifiants invalides.");
       return;
     }
 
-    router.push("/");
+    window.location.assign(redirectTo);
   }
 
   return (
