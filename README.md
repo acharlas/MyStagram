@@ -44,7 +44,8 @@ APP_ENV=local
 BACKEND_API_URL=http://backend:8000
 DATABASE_URL=postgresql+asyncpg://app:app@postgres:5432/instagram
 REDIS_URL=redis://redis:6379/0
-MINIO_ENDPOINT=http://minio:9000
+MINIO_ENDPOINT=minio:9000
+MINIO_BUCKET=instagram-media
 MINIO_ACCESS_KEY=<your-minio-access-key>
 MINIO_SECRET_KEY=<your-minio-secret-key>
 SECRET_KEY=<random-string>
@@ -61,6 +62,8 @@ NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=<random-string>
 ```
 
+Keep `NEXT_PUBLIC_MINIO_BASE_URL` on the Docker-internal hostname (`minio`) when using Next image optimization in containers.
+
 The sample values above are safe defaults for local development. Replace the placeholders (`<...>`) with secrets when deploying elsewhere and keep those keys out of version control.
 
 ---
@@ -76,6 +79,7 @@ The sample values above are safe defaults for local development. Replace the pla
    ```
    - Frontend: http://localhost:3000  
    - Backend docs: http://localhost:8000/docs  
+   - A one-shot `minio-init` job auto-creates the media bucket and applies read policy for demo assets.
    - Only frontend/backend are published to host.
    - PostgreSQL, Redis, and MinIO stay on the internal Docker network.
 
