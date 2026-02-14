@@ -9,18 +9,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_current_user, get_db
 from models import User
-from services.notifications import (
-    DEFAULT_STREAM_FOLLOW_ITEMS,
-    DEFAULT_STREAM_NOTIFICATIONS,
+from services.notifications.dismissals import (
     MAX_DISMISSED_NOTIFICATIONS,
-    MAX_STREAM_FOLLOW_ITEMS,
-    MAX_STREAM_NOTIFICATIONS,
+    dismiss_notification_for_user,
+    list_dismissed_notification_ids,
+)
+from services.notifications.schemas import (
     DismissNotificationRequest,
     DismissNotificationResponse,
     DismissedNotificationListResponse,
     NotificationStreamResponse,
-    dismiss_notification_for_user,
-    list_dismissed_notification_ids,
+)
+from services.notifications.stream import (
+    DEFAULT_STREAM_FOLLOW_ITEMS,
+    DEFAULT_STREAM_NOTIFICATIONS,
+    MAX_STREAM_FOLLOW_ITEMS,
+    MAX_STREAM_NOTIFICATIONS,
     load_notification_stream,
 )
 
@@ -83,6 +87,6 @@ async def dismiss_notification(
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc

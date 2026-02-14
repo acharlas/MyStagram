@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 from urllib.parse import quote
 
 from sqlalchemy import Integer, String, and_, literal, or_, select, union_all
@@ -30,14 +30,13 @@ DEFAULT_STREAM_NOTIFICATIONS = 16
 MAX_STREAM_FOLLOW_ITEMS = 32
 DEFAULT_STREAM_FOLLOW_ITEMS = 8
 
-NotificationEventRow = tuple[
-    str,
-    int,
-    int | None,
-    str | None,
-    str | None,
-    datetime | None,
-]
+class NotificationEventRow(NamedTuple):
+    kind: str
+    post_id: int
+    comment_id: int | None
+    liker_user_id: str | None
+    username: str | None
+    occurred_at: datetime | None
 
 
 def _build_comment_events_visible_subquery(
@@ -249,7 +248,24 @@ async def _fetch_notification_event_rows(
         )
         .limit(limit)
     )
-    return cast(list[NotificationEventRow], result.all())
+    return [
+        NotificationEventRow(
+            kind=kind,
+            post_id=post_id,
+            comment_id=comment_id,
+            liker_user_id=liker_user_id,
+            username=username,
+            occurred_at=occurred_at,
+        )
+        for (
+            kind,
+            post_id,
+            comment_id,
+            liker_user_id,
+            username,
+            occurred_at,
+        ) in result.all()
+    ]
 
 
 def _build_notification_stream_items(

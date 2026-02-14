@@ -136,6 +136,22 @@ async def test_dismissed_notifications_are_user_scoped(
 
 
 @pytest.mark.asyncio
+async def test_dismiss_notification_rejects_blank_identifier(
+    async_client: AsyncClient,
+) -> None:
+    payload = make_user_payload("notif_blank")
+    await register_and_login(async_client, payload)
+
+    response = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": "   "},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "notification_id must not be empty"
+
+
+@pytest.mark.asyncio
 async def test_notification_stream_requires_auth(async_client: AsyncClient) -> None:
     response = await async_client.get("/api/v1/notifications/stream")
     assert response.status_code == 401
