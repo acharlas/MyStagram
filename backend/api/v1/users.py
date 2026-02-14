@@ -232,17 +232,6 @@ async def list_user_posts(
         )
 
     viewer_id = current_user.id
-    if viewer_id != author.id:
-        follow_result = await session.execute(
-            select(Follow)
-            .where(
-                _eq(Follow.follower_id, viewer_id),
-                _eq(Follow.followee_id, author.id),
-            )
-            .limit(1)
-        )
-        if follow_result.scalar_one_or_none() is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     posts_query = (
         select(Post)
