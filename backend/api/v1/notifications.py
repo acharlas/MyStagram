@@ -13,7 +13,6 @@ from sqlalchemy import (
     String,
     and_,
     cast as sa_cast,
-    func,
     literal,
     or_,
     select,
@@ -128,12 +127,29 @@ def _legacy_like_notification_id_expression(
     )
 
 
-async def _load_notification_stream_items(
-    session: AsyncSession,
+def _follow_notification_id_expression(
+    follower_user_id_column: ColumnElement[str],
+) -> ColumnElement[str]:
+    return cast(
+        ColumnElement[str],
+        literal("follow-") + sa_cast(cast(Any, follower_user_id_column), String()),
+    )
+
+
+NotificationEventRow = tuple[
+    str,
+    int,
+    int | None,
+    str | None,
+    str | None,
+    datetime | None,
+]
+
+
+def _build_comment_events_visible_subquery(
     user_id: str,
-    *,
     limit: int,
-) -> list[NotificationStreamItem]:
+) -> Any:
     comment_id_column = cast(ColumnElement[int], Comment.id)
     comment_post_id_column = cast(ColumnElement[int], Comment.post_id)
     comment_author_id_column = cast(ColumnElement[str], Comment.author_id)
@@ -148,10 +164,7 @@ async def _load_notification_stream_items(
         ColumnElement[str], dismissed_comment.notification_id
     )
 
-    null_user_id = literal(None, type_=String(length=36))
-    null_comment_id = literal(None, type_=Integer())
-
-    comment_events_visible = (
+    return (
         select(
             comment_post_id_column.label("post_id"),
             comment_id_column.label("comment_id"),
@@ -182,30 +195,17 @@ async def _load_notification_stream_items(
         .limit(limit)
         .subquery("comment_events_visible")
     )
-    comment_events = select(
-        literal("comment").label("kind"),
-        cast(ColumnElement[int], comment_events_visible.c.post_id).label("post_id"),
-        cast(ColumnElement[int], comment_events_visible.c.comment_id).label(
-            "comment_id"
-        ),
-        null_user_id.label("liker_user_id"),
-        cast(ColumnElement[str | None], comment_events_visible.c.username).label(
-            "username"
-        ),
-        cast(
-            ColumnElement[datetime | None], comment_events_visible.c.occurred_at
-        ).label("occurred_at"),
-    )
 
+
+def _build_like_events_visible_subquery(
+    user_id: str,
+    limit: int,
+) -> Any:
     like_post_id_column = cast(ColumnElement[int], Like.post_id)
     like_user_id_column = cast(ColumnElement[str], Like.user_id)
-    like_created_at_column = cast(ColumnElement[datetime], Like.created_at)
     like_updated_at_column = cast(ColumnElement[datetime], Like.updated_at)
     like_username_column = cast(ColumnElement[str | None], User.username)
-    like_event_time_column = cast(
-        ColumnElement[datetime],
-        func.coalesce(like_updated_at_column, like_created_at_column),
-    )
+    like_event_time_column = like_updated_at_column
     like_notification_id_column = _like_notification_id_expression(
         like_post_id_column, like_user_id_column
     )
@@ -227,7 +227,7 @@ async def _load_notification_stream_items(
         ColumnElement[datetime | None], dismissed_like_legacy.dismissed_at
     )
 
-    like_events_visible = (
+    return (
         select(
             like_post_id_column.label("post_id"),
             like_user_id_column.label("liker_user_id"),
@@ -275,6 +275,34 @@ async def _load_notification_stream_items(
         .limit(limit)
         .subquery("like_events_visible")
     )
+
+
+async def _fetch_notification_event_rows(
+    session: AsyncSession,
+    user_id: str,
+    *,
+    limit: int,
+) -> list[NotificationEventRow]:
+    comment_events_visible = _build_comment_events_visible_subquery(user_id, limit)
+    like_events_visible = _build_like_events_visible_subquery(user_id, limit)
+    null_user_id = literal(None, type_=String(length=36))
+    null_comment_id = literal(None, type_=Integer())
+
+    comment_events = select(
+        literal("comment").label("kind"),
+        cast(ColumnElement[int], comment_events_visible.c.post_id).label("post_id"),
+        cast(ColumnElement[int], comment_events_visible.c.comment_id).label(
+            "comment_id"
+        ),
+        null_user_id.label("liker_user_id"),
+        cast(ColumnElement[str | None], comment_events_visible.c.username).label(
+            "username"
+        ),
+        cast(
+            ColumnElement[datetime | None], comment_events_visible.c.occurred_at
+        ).label("occurred_at"),
+    )
+
     like_events = select(
         literal("like").label("kind"),
         cast(ColumnElement[int], like_events_visible.c.post_id).label("post_id"),
@@ -325,16 +353,14 @@ async def _load_notification_stream_items(
         )
         .limit(limit)
     )
+    return cast(list[NotificationEventRow], result.all())
 
+
+def _build_notification_stream_items(
+    rows: list[NotificationEventRow],
+) -> list[NotificationStreamItem]:
     notifications: list[NotificationStreamItem] = []
-    for (
-        kind,
-        post_id,
-        comment_id,
-        liker_user_id,
-        username,
-        occurred_at,
-    ) in result.all():
+    for kind, post_id, comment_id, liker_user_id, username, occurred_at in rows:
         if kind == "comment":
             if comment_id is None:
                 continue
@@ -363,6 +389,20 @@ async def _load_notification_stream_items(
             )
         )
     return notifications
+
+
+async def _load_notification_stream_items(
+    session: AsyncSession,
+    user_id: str,
+    *,
+    limit: int,
+) -> list[NotificationStreamItem]:
+    rows = await _fetch_notification_event_rows(
+        session,
+        user_id,
+        limit=limit,
+    )
+    return _build_notification_stream_items(rows)
 
 
 @router.get("/dismissed", response_model=DismissedNotificationListResponse)
@@ -414,6 +454,16 @@ async def get_notification_stream(
     follow_created_at_column = cast(ColumnElement[datetime], Follow.created_at)
     follow_username_column = cast(ColumnElement[str | None], User.username)
     follow_name_column = cast(ColumnElement[str | None], User.name)
+    follow_notification_id_column = _follow_notification_id_expression(
+        follow_follower_id_column
+    )
+    dismissed_follow = aliased(DismissedNotification)
+    dismissed_follow_notification_id_column = cast(
+        ColumnElement[str], dismissed_follow.notification_id
+    )
+    dismissed_follow_at_column = cast(
+        ColumnElement[datetime | None], dismissed_follow.dismissed_at
+    )
     follow_result = await session.execute(
         select(
             follow_follower_id_column,
@@ -422,7 +472,23 @@ async def get_notification_stream(
             follow_name_column,
         )
         .join(User, _eq(User.id, Follow.follower_id))
+        .outerjoin(
+            dismissed_follow,
+            and_(
+                _eq(dismissed_follow.user_id, user_id),
+                _eq(
+                    dismissed_follow_notification_id_column,
+                    follow_notification_id_column,
+                ),
+            ),
+        )
         .where(_eq(Follow.followee_id, user_id))
+        .where(
+            or_(
+                dismissed_follow_at_column.is_(None),
+                dismissed_follow_at_column < follow_created_at_column,
+            )
+        )
         .order_by(
             _desc(cast(Any, Follow.created_at)),
             _desc(cast(Any, Follow.follower_id)),

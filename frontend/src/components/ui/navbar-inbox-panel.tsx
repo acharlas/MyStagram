@@ -171,25 +171,45 @@ export function NavbarInboxPanel({
         </div>
         <div className="mt-2 space-y-2">
           {followRequests.map((request) => (
-            <Link
+            <article
               key={request.id}
-              href={request.href}
-              onClick={onNavigate}
               className="flex items-start gap-2 rounded-xl px-3 py-2 transition hover:bg-[color:var(--ui-surface-muted)]"
             >
-              <span className="ui-surface-input ui-text-subtle mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ui-border">
-                <UserPlusIcon className="h-4 w-4" />
-              </span>
-              <span className="min-w-0">
-                <span className="ui-text-strong block text-sm">
-                  <span className="font-semibold">{request.name}</span>{" "}
-                  <span className="ui-text-muted">@{request.username}</span>
+              <Link
+                href={request.href}
+                onClick={() => {
+                  onNotificationRead(request.id);
+                  onNavigate();
+                }}
+                className="flex min-w-0 flex-1 items-start gap-2"
+              >
+                <span className="ui-surface-input ui-text-subtle mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ui-border">
+                  <UserPlusIcon className="h-4 w-4" />
                 </span>
-                <span className="ui-text-muted block text-xs">
-                  {formatRelativeTime(request.occurred_at)}
+                <span className="min-w-0">
+                  <span className="ui-text-strong block text-sm">
+                    <span className="font-semibold">{request.name}</span>{" "}
+                    <span className="ui-text-muted">@{request.username}</span>
+                  </span>
+                  <span className="ui-text-muted block text-xs">
+                    {formatRelativeTime(request.occurred_at)}
+                  </span>
                 </span>
-              </span>
-            </Link>
+              </Link>
+
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onNotificationRead(request.id);
+                }}
+                className="ui-focus-ring ui-text-muted ui-hover-surface rounded-full p-1 transition hover:text-[color:var(--ui-text-strong)]"
+                aria-label="Supprimer la notification de suivi"
+              >
+                <CloseIcon className="h-3.5 w-3.5" />
+              </button>
+            </article>
           ))}
         </div>
       </section>

@@ -42,6 +42,7 @@ async def test_like_table_has_post_updated_at_index(db_session: AsyncSession) ->
             lambda sync_conn: inspect(sync_conn).get_indexes("likes")
         )
     assert any(index["name"] == "ix_likes_post_updated_at" for index in indexes)
+    assert any(index["name"] == "ix_likes_updated_at_post_id" for index in indexes)
 
 
 @pytest.mark.asyncio

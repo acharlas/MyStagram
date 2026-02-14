@@ -109,7 +109,10 @@ export function useInboxState({ isOpen }: UseInboxStateArgs) {
           )
         : [];
       const nextFollowRequests = Array.isArray(payload.follow_requests)
-        ? payload.follow_requests
+        ? payload.follow_requests.filter(
+            (followRequest) =>
+              !dismissedNotificationIdsRef.current.has(followRequest.id),
+          )
         : [];
 
       hasLoadedRef.current = true;
@@ -159,6 +162,11 @@ export function useInboxState({ isOpen }: UseInboxStateArgs) {
     setNotifications((currentNotifications) =>
       currentNotifications.filter(
         (notification) => notification.id !== notificationId,
+      ),
+    );
+    setFollowRequests((currentFollowRequests) =>
+      currentFollowRequests.filter(
+        (followRequest) => followRequest.id !== notificationId,
       ),
     );
 

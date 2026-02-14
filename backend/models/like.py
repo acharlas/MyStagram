@@ -11,7 +11,10 @@ class Like(SQLModel, table=True):
     """Tracks which users liked which posts."""
 
     __tablename__ = "likes"
-    __table_args__ = (Index("ix_likes_post_updated_at", "post_id", "updated_at"),)
+    __table_args__ = (
+        Index("ix_likes_post_updated_at", "post_id", "updated_at"),
+        Index("ix_likes_updated_at_post_id", "updated_at", "post_id"),
+    )
 
     user_id: str = Field(
         sa_column=Column(
