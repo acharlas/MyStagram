@@ -33,7 +33,7 @@ export function NavSearchResults({
   onSelectUser,
   onClearRecentSearches,
   panelClassName = "mt-3 max-h-[70vh] space-y-2 overflow-y-auto",
-  focusRingClassName = "focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]",
+  focusRingClassName = "ui-focus-ring focus:outline-none",
 }: NavSearchResultsProps) {
   const renderUserEntry = (
     user: UserProfilePublic,
@@ -64,13 +64,13 @@ export function NavSearchResults({
               className="h-full w-full object-cover"
             />
           ) : (
-            <AvatarFallback className="ui-surface-input flex h-full w-full items-center justify-center text-xs uppercase text-zinc-100">
+            <AvatarFallback className="ui-surface-input ui-text-strong flex h-full w-full items-center justify-center text-xs uppercase">
               {initials}
             </AvatarFallback>
           )}
         </Avatar>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-zinc-100">
+          <p className="ui-text-strong truncate text-sm font-semibold">
             @{user.username}
           </p>
           {variant === "regular" && user.name ? (
@@ -87,7 +87,7 @@ export function NavSearchResults({
   return (
     <div aria-live="polite" className={panelClassName}>
       {searchError ? (
-        <p className="rounded-lg bg-red-950/30 px-3 py-2 text-sm text-red-300">
+        <p className="ui-error-surface rounded-lg px-3 py-2 text-sm">
           {searchError}
         </p>
       ) : !hasSearchValue ? (
@@ -100,7 +100,7 @@ export function NavSearchResults({
                   <button
                     type="button"
                     onClick={onClearRecentSearches}
-                    className="rounded-md px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-zinc-300 transition hover:bg-[color:var(--ui-surface-muted)] hover:text-zinc-100"
+                    className="ui-focus-ring ui-nav-icon-active rounded-md px-2 py-1 text-[11px] uppercase tracking-[0.08em] transition hover:bg-[color:var(--ui-surface-muted)]"
                   >
                     Effacer
                   </button>
