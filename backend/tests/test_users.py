@@ -173,6 +173,60 @@ async def test_update_me_cleans_up_avatar_when_commit_fails(
 
 
 @pytest.mark.asyncio
+async def test_update_me_replaces_avatar_and_deletes_previous_object(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    user = User(
+        id="avatar-replace-user",
+        username="avatar_replace_user",
+        email="avatar_replace_user@example.com",
+        password_hash="hash",
+        avatar_key="avatars/old-avatar.jpg",
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    uploaded_keys: list[str] = []
+    deleted_keys: list[str] = []
+
+    class DummyMinio:
+        def bucket_exists(self, bucket_name: str) -> bool:
+            return True
+
+        def make_bucket(self, bucket_name: str) -> None:
+            return None
+
+        def put_object(self, bucket_name, object_name, data, length, content_type=None):
+            uploaded_keys.append(object_name)
+
+    dummy_client = DummyMinio()
+    monkeypatch.setattr(users_api, "get_minio_client", lambda: dummy_client)
+    monkeypatch.setattr(users_api, "ensure_bucket", lambda client=None: None)
+    monkeypatch.setattr(users_api, "delete_object", lambda object_key: deleted_keys.append(object_key))
+
+    image = Image.new("RGB", (800, 600), color=(20, 180, 240))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    upload = UploadFile(filename="avatar.png", file=BytesIO(buffer.getvalue()))
+
+    result = await users_api.update_me(
+        name=None,
+        bio=None,
+        avatar=upload,
+        current_user=user,
+        session=db_session,
+    )
+
+    assert result.avatar_key is not None
+    assert uploaded_keys == [result.avatar_key]
+    assert deleted_keys == ["avatars/old-avatar.jpg"]
+
+    await upload.close()
+
+
+@pytest.mark.asyncio
 async def test_get_me_returns_private_profile(async_client: AsyncClient):
     payload = build_payload()
     await async_client.post("/api/v1/auth/register", json=payload)

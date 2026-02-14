@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from io import BytesIO
 from typing import Annotated, Any, cast
 from uuid import uuid4
@@ -32,6 +33,7 @@ from services import (
 
 router = APIRouter(tags=["users"])
 MAX_PROFILE_NAME_LENGTH = 80
+logger = logging.getLogger(__name__)
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -162,6 +164,7 @@ async def update_me(
     """Update the authenticated user's profile."""
     updated = False
     uploaded_avatar_key: str | None = None
+    previous_avatar_key = current_user.avatar_key
 
     if name is not None:
         normalized_name = name.strip()
@@ -216,14 +219,30 @@ async def update_me(
             if uploaded_avatar_key is not None:
                 try:
                     await asyncio.to_thread(delete_object, uploaded_avatar_key)
-                except Exception:
-                    # Best-effort cleanup to avoid orphaned media on failed commits.
-                    pass
+                except Exception as cleanup_error:
+                    logger.warning(
+                        "Failed to cleanup uploaded avatar after profile update commit failure",
+                        extra={"avatar_key": uploaded_avatar_key},
+                        exc_info=cleanup_error,
+                    )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to update profile",
             ) from exc
         await session.refresh(current_user)
+        if (
+            uploaded_avatar_key is not None
+            and previous_avatar_key is not None
+            and previous_avatar_key != uploaded_avatar_key
+        ):
+            try:
+                await asyncio.to_thread(delete_object, previous_avatar_key)
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Failed to cleanup replaced avatar object after profile update",
+                    extra={"avatar_key": previous_avatar_key},
+                    exc_info=cleanup_error,
+                )
 
     return UserProfilePrivate.model_validate(current_user)
 
