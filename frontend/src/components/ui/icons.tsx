@@ -179,3 +179,43 @@ export function CommentIcon({ className, ...props }: IconProps) {
     </svg>
   );
 }
+
+export function BellIcon({ className, ...props }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={iconClassName(className)}
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M6.5 9.75a5.5 5.5 0 1 1 11 0c0 2.1.6 3.8 1.8 5.15.46.52.1 1.35-.6 1.35H5.3c-.7 0-1.06-.83-.6-1.35 1.2-1.35 1.8-3.04 1.8-5.15Z" />
+      <path d="M9.5 18.25a2.5 2.5 0 0 0 5 0" />
+    </svg>
+  );
+}
+
+export function UserPlusIcon({ className, ...props }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={iconClassName(className)}
+      aria-hidden="true"
+      {...props}
+    >
+      <circle cx="10" cy="8" r="3.25" />
+      <path d="M4.7 18c1.1-2.4 3.2-3.7 5.3-3.7s4.2 1.3 5.3 3.7" />
+      <path d="M18.5 8.5v5" />
+      <path d="M16 11h5" />
+    </svg>
+  );
+}
