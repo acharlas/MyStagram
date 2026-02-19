@@ -5,6 +5,7 @@ export type PostDetail = {
   author_id: string;
   author_name: string | null;
   author_username: string | null;
+  author_avatar_key: string | null;
   image_key: string;
   caption: string | null;
   like_count: number;

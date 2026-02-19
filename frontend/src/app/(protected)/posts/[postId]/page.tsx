@@ -3,10 +3,11 @@ import Link from "next/link";
 
 import { CommentForm } from "@/components/post/CommentForm";
 import { LikeButton } from "@/components/post/LikeButton";
+import { Avatar, AvatarImage } from "@/components/ui/avatar";
 import { CommentIcon } from "@/components/ui/icons";
 import { fetchPostComments, fetchPostDetail } from "@/lib/api/posts";
 import { getSessionServer } from "@/lib/auth/session";
-import { buildImageUrl } from "@/lib/image";
+import { buildAvatarUrl, buildImageUrl } from "@/lib/image";
 
 type PostPageProps = { params: Promise<{ postId: string }> };
 
@@ -31,6 +32,7 @@ export default async function PostDetailPage({ params }: PostPageProps) {
   const authorLabel =
     post.author_name ?? post.author_username ?? post.author_id;
   const authorUsername = post.author_username ?? undefined;
+  const authorAvatarUrl = buildAvatarUrl(post.author_avatar_key);
   const imageUrl = buildImageUrl(post.image_key);
 
   return (
@@ -53,18 +55,29 @@ export default async function PostDetailPage({ params }: PostPageProps) {
         className="ui-surface-card flex max-h-full flex-col rounded-3xl border ui-border p-4 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] lg:w-[25rem]"
       >
         <header className="mb-4 border-b ui-border pb-3">
-          {authorUsername ? (
-            <Link
-              href={`/users/${encodeURIComponent(authorUsername)}`}
-              className="ui-focus-ring ui-text-strong text-sm font-semibold transition hover:text-[color:var(--ui-nav-icon-active)] focus:outline-none"
-            >
-              {authorLabel}
-            </Link>
-          ) : (
-            <p className="ui-text-strong text-sm font-semibold">
-              {authorLabel}
-            </p>
-          )}
+          <div className="flex items-center gap-2.5">
+            <Avatar className="ui-surface-muted ui-text-muted flex h-9 w-9 items-center justify-center overflow-hidden rounded-full ring-1 ring-[color:var(--ui-border)]">
+              <AvatarImage
+                src={authorAvatarUrl}
+                alt={`Avatar de ${authorLabel}`}
+                width={36}
+                height={36}
+                className="h-full w-full object-cover"
+              />
+            </Avatar>
+            {authorUsername ? (
+              <Link
+                href={`/users/${encodeURIComponent(authorUsername)}`}
+                className="ui-focus-ring ui-text-strong text-sm font-semibold transition hover:text-[color:var(--ui-nav-icon-active)] focus:outline-none"
+              >
+                {authorLabel}
+              </Link>
+            ) : (
+              <p className="ui-text-strong text-sm font-semibold">
+                {authorLabel}
+              </p>
+            )}
+          </div>
           <p className="ui-text-muted mt-2 text-sm leading-relaxed">
             {post.caption || "Aucune légende"}
           </p>

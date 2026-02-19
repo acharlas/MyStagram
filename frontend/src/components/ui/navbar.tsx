@@ -9,6 +9,7 @@ import type {
 } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { Avatar, AvatarImage } from "@/components/ui/avatar";
 import {
   BellIcon,
   BrandMarkIcon,
@@ -32,6 +33,7 @@ import { useInboxState } from "@/components/ui/use-inbox-state";
 import { useNavSearch } from "@/components/ui/use-nav-search";
 import { useSearchInputFocus } from "@/components/ui/use-search-input-focus";
 import type { UserProfilePublic } from "@/lib/api/users";
+import { buildAvatarUrl } from "@/lib/image";
 
 type NavItem = {
   href: string;
@@ -50,9 +52,10 @@ const MOBILE_LINK_ITEMS: NavItem[] = [
 
 type NavBarProps = {
   username?: string;
+  avatarKey?: string | null;
 };
 
-export function NavBar({ username }: NavBarProps) {
+export function NavBar({ username, avatarKey }: NavBarProps) {
   const pathname = usePathname();
   const [isSearching, setIsSearching] = useState(false);
   const [isDesktopInboxOpen, setIsDesktopInboxOpen] = useState(false);
@@ -204,6 +207,7 @@ export function NavBar({ username }: NavBarProps) {
   };
 
   const viewerName = username ?? "invité";
+  const viewerAvatarUrl = buildAvatarUrl(avatarKey);
   const profileHref = resolveProfileHref("/profile", username);
   const isMobileProfileActive =
     isMobileProfileOpen ||
@@ -395,9 +399,15 @@ export function NavBar({ username }: NavBarProps) {
                   href={profileHref}
                   className="ui-focus-ring ui-hover-surface flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1.5 py-1.5 transition"
                 >
-                  <span className="ui-surface-muted ui-text-subtle flex h-10 w-10 items-center justify-center rounded-full">
-                    <UserIcon className="h-5 w-5" />
-                  </span>
+                  <Avatar className="ui-surface-muted ui-text-subtle flex h-10 w-10 items-center justify-center overflow-hidden rounded-full">
+                    <AvatarImage
+                      src={viewerAvatarUrl}
+                      alt={`Avatar de ${viewerName}`}
+                      width={40}
+                      height={40}
+                      className="h-full w-full object-cover"
+                    />
+                  </Avatar>
                   <span className="ui-text-strong truncate text-sm font-medium">
                     {viewerName}
                   </span>

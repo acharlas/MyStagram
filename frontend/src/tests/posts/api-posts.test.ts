@@ -38,6 +38,7 @@ describe("fetchPostDetail", () => {
       author_id: "user-1",
       author_name: "User One",
       author_username: "user1",
+      author_avatar_key: "avatars/user-1/default.png",
       caption: "Hello",
       image_key: "photos/hello.jpg",
       like_count: 3,

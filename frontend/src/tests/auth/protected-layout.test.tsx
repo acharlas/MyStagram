@@ -11,6 +11,8 @@ import {
 
 const redirectMock = vi.hoisted(() => vi.fn());
 const getSessionServerMock = vi.hoisted(() => vi.fn());
+const apiServerFetchMock = vi.hoisted(() => vi.fn());
+const navBarMock = vi.hoisted(() => vi.fn(() => null));
 
 vi.mock("next/navigation", () => ({
   redirect: redirectMock,
@@ -20,8 +22,25 @@ vi.mock("@/lib/auth/session", () => ({
   getSessionServer: getSessionServerMock,
 }));
 
+vi.mock("@/lib/api/client", () => {
+  class MockApiError extends Error {
+    readonly status: number;
+
+    constructor(status: number, message?: string) {
+      super(message ?? `API request failed with status ${status}`);
+      this.name = "ApiError";
+      this.status = status;
+    }
+  }
+
+  return {
+    ApiError: MockApiError,
+    apiServerFetch: apiServerFetchMock,
+  };
+});
+
 vi.mock("@/components/ui/navbar", () => ({
-  NavBar: () => null,
+  NavBar: navBarMock,
 }));
 
 import ProtectedLayout from "@/app/(protected)/layout";
@@ -46,6 +65,7 @@ describe("protected layout", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    apiServerFetchMock.mockResolvedValue({ avatar_key: null });
   });
 
   it("redirects to login when no access token exists", async () => {
@@ -54,6 +74,8 @@ describe("protected layout", () => {
     await ProtectedLayout({ children: <div /> });
 
     expect(redirectMock).toHaveBeenCalledWith("/login");
+    expect(apiServerFetchMock).not.toHaveBeenCalled();
+    expect(navBarMock).not.toHaveBeenCalled();
   });
 
   it("redirects to login when session has an auth error", async () => {
@@ -66,17 +88,44 @@ describe("protected layout", () => {
     await ProtectedLayout({ children: <div /> });
 
     expect(redirectMock).toHaveBeenCalledWith("/login");
+    expect(apiServerFetchMock).not.toHaveBeenCalled();
+    expect(navBarMock).not.toHaveBeenCalled();
   });
 
   it("renders layout when session is valid", async () => {
+    apiServerFetchMock.mockResolvedValueOnce({
+      avatar_key: "avatars/from-profile.png",
+    });
     getSessionServerMock.mockResolvedValueOnce({
       accessToken: "access-token",
-      user: { username: "string" },
+      user: { username: "string", avatarUrl: "avatars/from-session.png" },
     });
 
     const layout = await ProtectedLayout({ children: <div /> });
 
     expect(redirectMock).not.toHaveBeenCalled();
     expect(layout).not.toBeNull();
+    expect(apiServerFetchMock).toHaveBeenCalledWith(
+      "/api/v1/me",
+      expect.objectContaining({
+        headers: {
+          Cookie: "access_token=access-token",
+        },
+      }),
+    );
+    const rootElement = layout as React.ReactElement<{
+      children: React.ReactNode;
+    }>;
+    const renderedChildren = React.Children.toArray(rootElement.props.children);
+    const navElement = renderedChildren[0] as React.ReactElement<{
+      username?: string;
+      avatarKey?: string | null;
+    }>;
+    expect(navElement.props).toEqual(
+      expect.objectContaining({
+        username: "string",
+        avatarKey: "avatars/from-profile.png",
+      }),
+    );
   });
 });

@@ -3,10 +3,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { LikeButton } from "@/components/post/LikeButton";
+import { Avatar, AvatarImage } from "@/components/ui/avatar";
 import { CommentIcon } from "@/components/ui/icons";
 import { ApiError, apiServerFetch } from "@/lib/api/client";
 import { getSessionServer } from "@/lib/auth/session";
-import { buildImageUrl } from "@/lib/image";
+import { buildAvatarUrl, buildImageUrl } from "@/lib/image";
 import type { FeedPost } from "@/types/feed";
 
 async function getHomeFeed(accessToken?: string): Promise<FeedPost[] | null> {
@@ -34,20 +35,20 @@ function PostCard({ post }: { post: FeedPost }) {
   const displayName =
     post.author_name ?? post.author_username ?? post.author_id;
   const authorUsername = post.author_username ?? undefined;
-  const initials = displayName
-    .split(/\s+/u)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+  const avatarUrl = buildAvatarUrl(post.author_avatar_key);
 
   return (
     <article className="ui-surface-card group rounded-3xl border ui-border p-4 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] backdrop-blur sm:p-5">
       <header className="flex items-center gap-3">
-        <div className="ui-surface-muted ui-text-muted flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ring-1 ring-[color:var(--ui-border)]">
-          {initials || displayName.slice(0, 2).toUpperCase()}
-        </div>
+        <Avatar className="ui-surface-muted ui-text-muted flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-sm font-semibold ring-1 ring-[color:var(--ui-border)]">
+          <AvatarImage
+            src={avatarUrl}
+            alt={`Avatar de ${displayName}`}
+            width={40}
+            height={40}
+            className="h-full w-full object-cover"
+          />
+        </Avatar>
         <div className="min-w-0 text-sm">
           {authorUsername ? (
             <Link
