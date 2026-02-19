@@ -1,4 +1,5 @@
 import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
 
@@ -79,5 +80,54 @@ describe("UserProfilePage error semantics", () => {
       }),
     ).rejects.toThrow("__NOT_FOUND__");
     expect(notFoundMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders followers and following controls on profile header", async () => {
+    getSessionServerMock.mockResolvedValueOnce({
+      accessToken: "token-1",
+      user: { username: "alice" },
+    });
+    fetchUserProfileMock.mockResolvedValueOnce({
+      id: "user-1",
+      username: "alice",
+      name: "Alice",
+      bio: "Bio",
+      avatar_key: null,
+    });
+    fetchUserPostsMock.mockResolvedValueOnce([]);
+
+    const html = renderToStaticMarkup(
+      await UserProfilePage({
+        params: Promise.resolve({ username: "alice" }),
+      }),
+    );
+
+    expect(fetchUserFollowStatusMock).not.toHaveBeenCalled();
+    expect(html).toContain(">Followers<");
+    expect(html).toContain(">Following<");
+    expect(html).not.toContain("panel=followers");
+  });
+
+  it("does not render the connections dialog by default", async () => {
+    getSessionServerMock.mockResolvedValueOnce({
+      accessToken: "token-1",
+      user: { username: "alice" },
+    });
+    fetchUserProfileMock.mockResolvedValueOnce({
+      id: "user-1",
+      username: "alice",
+      name: "Alice",
+      bio: null,
+      avatar_key: null,
+    });
+    fetchUserPostsMock.mockResolvedValueOnce([]);
+
+    const html = renderToStaticMarkup(
+      await UserProfilePage({
+        params: Promise.resolve({ username: "alice" }),
+      }),
+    );
+
+    expect(html).not.toContain("Connexions utilisateur");
   });
 });

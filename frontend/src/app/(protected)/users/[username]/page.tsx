@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SettingsIcon } from "@/components/ui/icons";
+import { ConnectionsPanel } from "@/components/user/ConnectionsPanel";
 import { FollowButton } from "@/components/user/FollowButton";
 import { ApiError } from "@/lib/api/client";
 import {
@@ -19,9 +20,7 @@ type UserProfilePageProps = {
   params: Promise<{ username: string }>;
 };
 
-export default async function UserProfilePage({
-  params,
-}: UserProfilePageProps) {
+export default async function UserProfilePage({ params }: UserProfilePageProps) {
   const { username } = await params;
   const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
@@ -50,10 +49,7 @@ export default async function UserProfilePage({
 
   let posts = [] as Awaited<ReturnType<typeof fetchUserPosts>>;
   try {
-    [posts, isFollowing] = await Promise.all([
-      postsPromise,
-      followStatusPromise,
-    ]);
+    [posts, isFollowing] = await Promise.all([postsPromise, followStatusPromise]);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
       notFound();
@@ -95,6 +91,7 @@ export default async function UserProfilePage({
                   {profile.bio}
                 </p>
               ) : null}
+              <ConnectionsPanel username={profile.username} />
               {!isOwnProfile && viewerUsername && accessToken ? (
                 <FollowButton
                   initiallyFollowing={isFollowing}
