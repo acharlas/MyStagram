@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime, timedelta, timezone
 from collections.abc import Sequence
 from typing import Any, Callable, Literal, cast
@@ -39,6 +40,7 @@ COOKIE_SECURE = (
 )
 MAX_ACTIVE_REFRESH_TOKENS = 5
 MAX_PROFILE_BIO_LENGTH = 500
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._]{1,28}[A-Za-z0-9_]$")
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -84,10 +86,12 @@ class RegisterRequest(BaseModel):
 
     @field_validator("username")
     @classmethod
-    def _reject_email_like_username(cls, value: str) -> str:
+    def _validate_username(cls, value: str) -> str:
         normalized = value.strip()
-        if "@" in normalized:
-            raise ValueError("Username cannot contain '@'")
+        if not USERNAME_PATTERN.fullmatch(normalized):
+            raise ValueError(
+                "Username must be 3-30 chars, use letters/numbers/._, and start/end with a letter, number, or underscore"
+            )
         return normalized
 
 

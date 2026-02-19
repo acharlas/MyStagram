@@ -58,13 +58,45 @@ async def test_register_normalizes_email_to_lowercase(async_client):
 
 
 @pytest.mark.asyncio
-async def test_register_rejects_email_like_username(async_client):
+@pytest.mark.parametrize(
+    "username",
+    [
+        "not_allowed@example.com",
+        "bad/name",
+        ".leadingdot",
+        "trailingdot.",
+        "space name",
+    ],
+)
+async def test_register_rejects_invalid_username_format(async_client, username: str):
     payload = build_payload()
-    payload["username"] = "not_allowed@example.com"
+    payload["username"] = username
 
     response = await async_client.post("/api/v1/auth/register", json=payload)
 
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_accepts_username_with_allowed_symbols(async_client):
+    payload = build_payload()
+    payload["username"] = "alpha.user_name"
+
+    response = await async_client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["username"] == payload["username"]
+
+
+@pytest.mark.asyncio
+async def test_register_accepts_max_length_canonical_username(async_client):
+    payload = build_payload()
+    payload["username"] = "a" + ("b" * 28) + "z"
+
+    response = await async_client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["username"] == payload["username"]
 
 
 @pytest.mark.asyncio
