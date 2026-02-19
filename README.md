@@ -80,10 +80,9 @@ The sample values above are safe defaults for local development. Replace the pla
    ```bash
    docker compose up --build -d
    ```
-   - Frontend: http://localhost:3000  
-   - Backend docs: http://localhost:8000/docs  
+   - Frontend: http://localhost:3000
    - A one-shot `minio-init` job auto-creates the media bucket and applies read policy for demo assets.
-   - Only frontend/backend are published to host.
+   - Only frontend is published to host.
    - PostgreSQL, Redis, and MinIO stay on the internal Docker network.
 
 3. **Optional: boot development mode (hot reload + infra tool ports)**
@@ -91,6 +90,7 @@ The sample values above are safe defaults for local development. Replace the pla
    docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
    ```
    - Enables bind mounts and reload for backend/frontend.
+   - Backend docs: http://localhost:8000/docs
    - Exposes PostgreSQL (5432), Redis (6379), MinIO API (9000), MinIO console (9001).
 
 4. **Seed demo data (users, follows, posts with captions and placeholder images)**
