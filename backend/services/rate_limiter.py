@@ -190,12 +190,15 @@ def default_client_identifier(request: Request) -> str:
 
     remote_host, remote_ip = _remote_ip(request)
 
+    # Signed forwarded identifiers are verified with HMAC and do not rely
+    # on source IP trust assumptions.
+    forwarded_identifier = _extract_forwarded_client_identifier(request)
+    if forwarded_identifier is not None:
+        return forwarded_identifier
+
     # Only trust forwarded source IP headers from explicitly configured
     # proxy/load balancer networks.
     if _is_trusted_proxy(remote_ip):
-        forwarded_identifier = _extract_forwarded_client_identifier(request)
-        if forwarded_identifier is not None:
-            return forwarded_identifier
         forwarded_ip = _extract_client_ip_from_headers(request)
         if forwarded_ip:
             return forwarded_ip

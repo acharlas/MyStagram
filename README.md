@@ -44,6 +44,7 @@ APP_ENV=local
 BACKEND_API_URL=http://backend:8000
 DATABASE_URL=postgresql+asyncpg://app:app@postgres:5432/instagram
 REDIS_URL=redis://redis:6379/0
+RATE_LIMIT_PROXY_SECRET=<shared-random-string>
 MINIO_ENDPOINT=minio:9000
 MINIO_BUCKET=instagram-media
 MINIO_ACCESS_KEY=<your-minio-access-key>
@@ -60,9 +61,11 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_MINIO_BASE_URL=http://minio:9000/instagram-media
 NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=<random-string>
+RATE_LIMIT_PROXY_SECRET=<shared-random-string>
 ```
 
 Keep `NEXT_PUBLIC_MINIO_BASE_URL` on the Docker-internal hostname (`minio`) when using Next image optimization in containers.
+Set the same `RATE_LIMIT_PROXY_SECRET` value in both `.env.backend` and `.env.frontend` so auth rate limiting can distinguish users behind the frontend container.
 
 The sample values above are safe defaults for local development. Replace the placeholders (`<...>`) with secrets when deploying elsewhere and keep those keys out of version control.
 

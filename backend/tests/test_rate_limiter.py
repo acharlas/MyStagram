@@ -114,6 +114,18 @@ def test_default_client_identifier_uses_forwarded_proxy_key_for_trusted_proxies(
     assert default_client_identifier(request) == f"proxy:{client_key}"
 
 
+def test_default_client_identifier_uses_signed_proxy_key_without_trusted_proxy() -> None:
+    client_key = "QRSTUVWX12345678"
+    request = _build_request(client_host="10.0.0.12")
+    request.scope["path"] = "/api/v1/auth/login"
+    request.scope["headers"] = [
+        (b"x-rate-limit-client", client_key.encode("ascii")),
+        (b"x-rate-limit-signature", _build_proxy_signature(client_key).encode("ascii")),
+    ]
+
+    assert default_client_identifier(request) == f"proxy:{client_key}"
+
+
 def test_default_client_identifier_ignores_forwarded_proxy_key_without_signature() -> None:
     request = _build_request(client_host="10.0.0.12")
     request.scope["path"] = "/api/v1/auth/login"
