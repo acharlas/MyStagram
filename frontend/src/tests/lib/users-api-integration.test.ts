@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiError } from "../../lib/api/client";
-import { fetchUserFollowers, fetchUserFollowStatus } from "../../lib/api/users";
+import {
+  fetchUserConnectionPage,
+  fetchUserConnections,
+  fetchUserFollowers,
+  fetchUserFollowStatus,
+} from "../../lib/api/users";
 
 const originalFetch = globalThis.fetch;
 const ORIGINAL_BACKEND_URL = process.env.BACKEND_API_URL;
@@ -88,6 +93,87 @@ describe("user API integration behavior", () => {
       status: 404,
       message: "User not found",
     } satisfies Partial<ApiError>);
+  });
+
+  it("fetchUserConnectionPage parses x-next-offset header", async () => {
+    const following = [
+      {
+        id: "u1",
+        username: "bob",
+        name: "Bob",
+        bio: null,
+        avatar_key: null,
+      },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(following), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-next-offset": "21",
+        },
+      }),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    const result = await fetchUserConnectionPage(
+      "demo",
+      "following",
+      { limit: 20, offset: 1 },
+      "token-1",
+    );
+
+    expect(result).toEqual({
+      data: following,
+      nextOffset: 21,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://backend:8000/api/v1/users/demo/following?limit=20&offset=1",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Cookie: "access_token=token-1",
+          Authorization: "Bearer token-1",
+        }),
+      }),
+    );
+  });
+
+  it("fetchUserConnections uses frontend proxy endpoint", async () => {
+    const followers = [
+      {
+        id: "u1",
+        username: "bob",
+        name: "Bob",
+        bio: null,
+        avatar_key: null,
+      },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          data: followers,
+          nextOffset: 20,
+        },
+        200,
+      ),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    const result = await fetchUserConnections("demo", "followers", {
+      limit: 20,
+      offset: 0,
+    });
+
+    expect(result).toEqual({
+      data: followers,
+      nextOffset: 20,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/users/demo/connections?kind=followers&limit=20",
+      expect.objectContaining({
+        credentials: "include",
+      }),
+    );
   });
 
   it("fetchUserFollowStatus returns false when no token is provided", async () => {

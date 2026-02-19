@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api/client";
 import {
+  fetchUserConnectionPage,
+  fetchUserConnections,
   fetchUserFollowers,
   fetchUserFollowStatus,
   fetchUserPosts,
@@ -9,7 +11,9 @@ import {
   unfollowUserRequest,
 } from "../../lib/api/users";
 
+const apiFetchMock = vi.hoisted(() => vi.fn());
 const apiServerFetchMock = vi.hoisted(() => vi.fn());
+const apiServerFetchPageMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../lib/api/client", async () => {
   const actual = await vi.importActual<typeof import("../../lib/api/client")>(
@@ -17,7 +21,9 @@ vi.mock("../../lib/api/client", async () => {
   );
   return {
     ...actual,
+    apiFetch: apiFetchMock,
     apiServerFetch: apiServerFetchMock,
+    apiServerFetchPage: apiServerFetchPageMock,
   };
 });
 
@@ -28,7 +34,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  apiFetchMock.mockReset();
   apiServerFetchMock.mockReset();
+  apiServerFetchPageMock.mockReset();
   vi.unstubAllGlobals();
   process.env.BACKEND_API_URL = ORIGINAL_BACKEND_URL;
 });
@@ -120,12 +128,15 @@ describe("fetchUserFollowers", () => {
         avatar_key: null,
       },
     ];
-    apiServerFetchMock.mockResolvedValueOnce(followers);
+    apiServerFetchPageMock.mockResolvedValueOnce({
+      data: followers,
+      nextOffset: null,
+    });
 
     const result = await fetchUserFollowers("demo", "token-1");
 
     expect(result).toEqual(followers);
-    expect(apiServerFetchMock).toHaveBeenCalledWith(
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
       "/api/v1/users/demo/followers",
       expect.objectContaining({
         headers: {
@@ -136,7 +147,7 @@ describe("fetchUserFollowers", () => {
   });
 
   it("throws when backend returns 404", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(
+    apiServerFetchPageMock.mockRejectedValueOnce(
       new ApiError(404, "User not found"),
     );
 
@@ -144,9 +155,106 @@ describe("fetchUserFollowers", () => {
   });
 
   it("throws when backend call fails with non-404", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
+    apiServerFetchPageMock.mockRejectedValueOnce(new Error("nope"));
 
     await expect(fetchUserFollowers("demo")).rejects.toThrow("nope");
+  });
+});
+
+describe("fetchUserConnectionPage", () => {
+  it("calls the selected connection endpoint with pagination", async () => {
+    const page = {
+      data: [
+        {
+          id: "follower-1",
+          username: "ally",
+          name: "Ally",
+          bio: null,
+          avatar_key: null,
+        },
+      ],
+      nextOffset: 40,
+    };
+    apiServerFetchPageMock.mockResolvedValueOnce(page);
+
+    const result = await fetchUserConnectionPage(
+      "demo",
+      "following",
+      { limit: 20, offset: 20 },
+      "token-1",
+    );
+
+    expect(result).toEqual(page);
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/users/demo/following?limit=20&offset=20",
+      expect.objectContaining({
+        headers: {
+          Cookie: "access_token=token-1",
+        },
+      }),
+    );
+  });
+
+  it("omits pagination query when limit and offset are not provided", async () => {
+    const page = { data: [], nextOffset: null };
+    apiServerFetchPageMock.mockResolvedValueOnce(page);
+
+    const result = await fetchUserConnectionPage("demo", "followers");
+
+    expect(result).toEqual(page);
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/users/demo/followers",
+      expect.objectContaining({
+        headers: undefined,
+      }),
+    );
+  });
+});
+
+describe("fetchUserConnections", () => {
+  it("calls the frontend connections endpoint with kind and pagination", async () => {
+    const page = {
+      data: [
+        {
+          id: "follower-1",
+          username: "ally",
+          name: "Ally",
+          bio: null,
+          avatar_key: null,
+        },
+      ],
+      nextOffset: 20,
+    };
+    apiFetchMock.mockResolvedValueOnce(page);
+
+    const result = await fetchUserConnections("demo", "followers", {
+      limit: 20,
+      offset: 0,
+    });
+
+    expect(result).toEqual(page);
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/users/demo/connections?kind=followers&limit=20",
+      expect.objectContaining({
+        cache: "no-store",
+        credentials: "include",
+      }),
+    );
+  });
+
+  it("omits offset in client request when offset is zero", async () => {
+    const page = { data: [], nextOffset: null };
+    apiFetchMock.mockResolvedValueOnce(page);
+
+    await fetchUserConnections("demo", "following", {
+      limit: 10,
+      offset: 0,
+    });
+
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/users/demo/connections?kind=following&limit=10",
+      expect.anything(),
+    );
   });
 });
 

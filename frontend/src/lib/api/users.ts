@@ -1,4 +1,10 @@
-import { ApiError, apiFetch, apiServerFetch } from "./client";
+import {
+  ApiError,
+  type ApiPage,
+  apiFetch,
+  apiServerFetch,
+  apiServerFetchPage,
+} from "./client";
 
 export type UserProfile = {
   id: string;
@@ -24,6 +30,8 @@ export type UserProfilePublic = {
   avatar_key: string | null;
 };
 
+export type UserConnectionsKind = "followers" | "following";
+
 export type FollowStatusResponse = {
   is_following: boolean;
 };
@@ -45,6 +53,30 @@ function buildHeaders(accessToken?: string): HeadersInit | undefined {
 
 function buildProfilePath(username: string) {
   return `/api/v1/users/${encodeURIComponent(username)}`;
+}
+
+function buildConnectionPath(
+  username: string,
+  kind: UserConnectionsKind,
+  {
+    limit,
+    offset,
+  }: {
+    limit?: number;
+    offset?: number;
+  } = {},
+): string {
+  const params = new URLSearchParams();
+  if (typeof limit === "number") {
+    params.set("limit", String(limit));
+  }
+  if (typeof offset === "number" && offset > 0) {
+    params.set("offset", String(offset));
+  }
+
+  const basePath = `${buildProfilePath(username)}/${kind}`;
+  const query = params.toString();
+  return query.length > 0 ? `${basePath}?${query}` : basePath;
 }
 
 export async function fetchUserProfile(
@@ -89,13 +121,60 @@ export async function fetchUserFollowers(
   accessToken?: string,
 ): Promise<UserProfilePublic[]> {
   // Contract: this helper propagates backend errors, including 404 for missing users.
-  return apiServerFetch<UserProfilePublic[]>(
-    `${buildProfilePath(username)}/followers`,
+  const page = await fetchUserConnectionPage(
+    username,
+    "followers",
+    undefined,
+    accessToken,
+  );
+  return page.data;
+}
+
+export function fetchUserConnectionPage(
+  username: string,
+  kind: UserConnectionsKind,
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  },
+  accessToken?: string,
+): Promise<ApiPage<UserProfilePublic[]>> {
+  return apiServerFetchPage<UserProfilePublic[]>(
+    buildConnectionPath(username, kind, pagination),
     {
       cache: "no-store",
       headers: buildHeaders(accessToken),
     },
   );
+}
+
+export function fetchUserConnections(
+  username: string,
+  kind: UserConnectionsKind,
+  {
+    limit = 20,
+    offset = 0,
+    signal,
+  }: {
+    limit?: number;
+    offset?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<ApiPage<UserProfilePublic[]>> {
+  const params = new URLSearchParams({ kind });
+  if (typeof limit === "number" && limit > 0) {
+    params.set("limit", String(limit));
+  }
+  if (typeof offset === "number" && offset > 0) {
+    params.set("offset", String(offset));
+  }
+
+  const url = `/api/users/${encodeURIComponent(username)}/connections?${params.toString()}`;
+  return apiFetch<ApiPage<UserProfilePublic[]>>(url, {
+    cache: "no-store",
+    credentials: "include",
+    signal,
+  });
 }
 
 export async function fetchUserFollowStatus(
