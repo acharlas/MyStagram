@@ -65,6 +65,21 @@ def test_settings_require_secret_in_production(monkeypatch):
         Settings(APP_ENV="production", _env_file=None)
 
 
+def test_settings_require_minimum_secret_length_in_production():
+    with pytest.raises(ValueError):
+        Settings(APP_ENV="production", SECRET_KEY="short-secret")
+
+
+def test_settings_accept_strong_secret_length_in_production():
+    settings = Settings(
+        APP_ENV="production",
+        SECRET_KEY="a" * 32,
+        ALLOW_INSECURE_HTTP_COOKIES=False,
+        _env_file=None,
+    )
+    assert settings.secret_key == "a" * 32
+
+
 def test_settings_accept_legacy_jwt_secret_alias(monkeypatch):
     monkeypatch.delenv("SECRET_KEY", raising=False)
     monkeypatch.delenv("JWT_SECRET", raising=False)
@@ -84,7 +99,7 @@ def test_settings_reject_insecure_http_cookies_outside_local(
     with pytest.raises(ValueError):
         Settings(
             APP_ENV=app_env,
-            SECRET_KEY="strong-production-secret",
+            SECRET_KEY="strong-production-secret-value-1234567890",
             ALLOW_INSECURE_HTTP_COOKIES=True,
         )
 

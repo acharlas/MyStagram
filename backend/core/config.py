@@ -31,6 +31,7 @@ INSECURE_SECRET_KEY_VALUES = frozenset(
         "secret",
     }
 )
+MIN_SECRET_KEY_LENGTH_NON_LOCAL = 32
 
 
 class Settings(BaseSettings):
@@ -138,6 +139,10 @@ class Settings(BaseSettings):
 
         if app_env not in {"local", "test"} and secret in INSECURE_SECRET_KEY_VALUES:
             raise ValueError("SECRET_KEY uses an insecure placeholder value")
+        if app_env not in {"local", "test"} and len(secret) < MIN_SECRET_KEY_LENGTH_NON_LOCAL:
+            raise ValueError(
+                f"SECRET_KEY must be at least {MIN_SECRET_KEY_LENGTH_NON_LOCAL} characters for non-local environments"
+            )
         if self.allow_insecure_http_cookies and app_env not in {"local", "test"}:
             raise ValueError(
                 "ALLOW_INSECURE_HTTP_COOKIES is only permitted for local/test environments"
