@@ -3,189 +3,36 @@ import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 
 import {
+  authorizeWithCredentials,
+  fetchUserProfile,
+  loginWithCredentials,
+  loginWithCredentialsWithClientKey,
+  type AuthorizedUser,
+} from "@/lib/auth/backend-auth";
+import {
   buildRateLimitClientKeyFromIdentifier,
-  buildRateLimitClientSignature,
-  RATE_LIMIT_CLIENT_HEADER,
-  RATE_LIMIT_SIGNATURE_HEADER,
 } from "@/lib/auth/rate-limit-client";
 import {
   clearRefreshCoordinatorStateForTests,
   getRecentRefreshResultCapacityForTests as getRefreshCoordinatorCapacityForTests,
   getRecentRefreshResultsSizeForTests as getRefreshCoordinatorRecentSizeForTests,
   getRecentRefreshResultTtlMsForTests as getRefreshCoordinatorTtlMsForTests,
-  RefreshTokenRequestError,
-  type RefreshTokenResponse,
   refreshTokensWithCoordinator,
 } from "@/lib/auth/refresh-coordinator";
-
-type BackendProfile = {
-  id: string;
-  username: string;
-  avatar_key?: string | null;
-};
-
-export type AuthorizedUser = {
-  id: string;
-  username: string;
-  avatarUrl: string | null;
-  accessToken: string;
-  refreshToken: string;
-};
+import {
+  applyAuthorizedUserToJwt,
+  ensureFreshAccessToken,
+} from "@/lib/auth/jwt-lifecycle";
 
 const API_BASE_URL = process.env.BACKEND_API_URL ?? "http://backend:8000";
-const ACCESS_TOKEN_FALLBACK_LIFETIME_MS = 14 * 60 * 1000;
-const ACCESS_TOKEN_REFRESH_SKEW_MS = 5 * 1000;
 
-function buildApiUrl(path: string) {
-  return new URL(path, API_BASE_URL).toString();
-}
-
-function parseTokenPayload(token: string): Record<string, unknown> | null {
-  const tokenParts = token.split(".");
-  if (tokenParts.length !== 3) {
-    return null;
-  }
-
-  try {
-    const payloadPart = tokenParts[1];
-    const decodedPayload = Buffer.from(payloadPart, "base64url").toString(
-      "utf-8",
-    );
-    const parsed = JSON.parse(decodedPayload) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function readAccessTokenExpiry(accessToken: string): number {
-  const payload = parseTokenPayload(accessToken);
-  const exp = payload?.exp;
-  if (typeof exp === "number" && Number.isFinite(exp)) {
-    return exp * 1000;
-  }
-  return Date.now() + ACCESS_TOKEN_FALLBACK_LIFETIME_MS;
-}
-
-function isTransientRefreshFailure(error: unknown): boolean {
-  if (error instanceof RefreshTokenRequestError) {
-    return error.status === 429 || error.status >= 500;
-  }
-  // Network-level fetch failures should not immediately invalidate session state.
-  return error instanceof TypeError;
-}
-
-function hasStillValidAccessToken(
-  accessToken: string | undefined,
-  expiresAtMs: number,
-): boolean {
-  return (
-    typeof accessToken === "string" &&
-    accessToken.length > 0 &&
-    Number.isFinite(expiresAtMs) &&
-    expiresAtMs > Date.now()
-  );
-}
-
-export async function loginWithCredentials(username: string, password: string) {
-  return loginWithCredentialsWithClientKey(username, password, null);
-}
-
-export async function loginWithCredentialsWithClientKey(
-  username: string,
-  password: string,
-  rateLimitClientKey: string | null,
-) {
-  const loginPath = "/api/v1/auth/login";
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  const rateLimitSignature = buildRateLimitClientSignature(rateLimitClientKey);
-  if (rateLimitClientKey && rateLimitSignature) {
-    headers[RATE_LIMIT_CLIENT_HEADER] = rateLimitClientKey;
-    headers[RATE_LIMIT_SIGNATURE_HEADER] = rateLimitSignature;
-  }
-
-  const response = await fetch(buildApiUrl(loginPath), {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ username, password }),
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error("Invalid credentials");
-  }
-
-  const payload = (await response.json()) as RefreshTokenResponse;
-  if (!payload.access_token || !payload.refresh_token) {
-    throw new Error("Missing authentication tokens");
-  }
-
-  return payload;
-}
-
-export async function fetchUserProfile(accessToken: string) {
-  const response = await fetch(buildApiUrl("/api/v1/me"), {
-    headers: {
-      Cookie: `access_token=${accessToken}`,
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to load profile");
-  }
-
-  return (await response.json()) as BackendProfile;
-}
-
-export type CredentialsInput = {
-  username?: string | null;
-  password?: string | null;
+export {
+  authorizeWithCredentials,
+  fetchUserProfile,
+  loginWithCredentials,
+  loginWithCredentialsWithClientKey,
 };
-
-type AuthorizationDependencies = {
-  login: typeof loginWithCredentialsWithClientKey;
-  profile: typeof fetchUserProfile;
-};
-
-export async function authorizeWithCredentials(
-  credentials: CredentialsInput,
-  deps?: Partial<AuthorizationDependencies>,
-  rateLimitClientKey: string | null = null,
-): Promise<AuthorizedUser | null> {
-  if (!credentials?.username || !credentials?.password) {
-    return null;
-  }
-
-  const {
-    login = loginWithCredentialsWithClientKey,
-    profile = fetchUserProfile,
-  } = deps ?? {};
-
-  try {
-    const tokens = await login(
-      credentials.username,
-      credentials.password,
-      rateLimitClientKey,
-    );
-    const profileData = await profile(tokens.access_token);
-
-    return {
-      id: profileData.id,
-      username: profileData.username,
-      avatarUrl: profileData.avatar_key ?? null,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-    };
-  } catch {
-    return null;
-  }
-}
+export type { AuthorizedUser };
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -216,75 +63,16 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        const authorizedUser = user as AuthorizedUser;
-        token.userId = authorizedUser.id;
-        token.username = authorizedUser.username;
-        token.avatarUrl = authorizedUser.avatarUrl;
-        token.accessToken = authorizedUser.accessToken;
-        token.refreshToken = authorizedUser.refreshToken;
-        token.accessTokenExpires = readAccessTokenExpiry(
-          authorizedUser.accessToken,
-        );
-        token.error = undefined;
-        return token;
+        return applyAuthorizedUserToJwt(token, user as AuthorizedUser);
       }
 
-      const currentAccessToken =
-        typeof token.accessToken === "string" ? token.accessToken : undefined;
-      const currentExpiry =
-        typeof token.accessTokenExpires === "number"
-          ? token.accessTokenExpires
-          : 0;
-      if (
-        currentAccessToken &&
-        currentExpiry > Date.now() + ACCESS_TOKEN_REFRESH_SKEW_MS
-      ) {
-        return token;
-      }
-
-      const currentRefreshToken =
-        typeof token.refreshToken === "string" ? token.refreshToken : undefined;
-      if (!currentRefreshToken) {
-        token.accessToken = undefined;
-        token.refreshToken = undefined;
-        token.accessTokenExpires = undefined;
-        token.error = "SessionExpired";
-        return token;
-      }
-
-      try {
-        const refreshedTokens = await refreshTokensWithCoordinator(
-          currentRefreshToken,
-          {
+      return ensureFreshAccessToken(token, {
+        refreshTokens: (refreshToken) =>
+          refreshTokensWithCoordinator(refreshToken, {
             apiBaseUrl: API_BASE_URL,
-          },
-        );
-        token.accessToken = refreshedTokens.access_token;
-        token.refreshToken = refreshedTokens.refresh_token;
-        token.accessTokenExpires = readAccessTokenExpiry(
-          refreshedTokens.access_token,
-        );
-        token.error = undefined;
-      } catch (error) {
-        if (
-          isTransientRefreshFailure(error) &&
-          hasStillValidAccessToken(currentAccessToken, currentExpiry)
-        ) {
-          console.warn(
-            "Transient refresh failure; preserving session for retry",
-            error,
-          );
-          token.error = undefined;
-          return token;
-        }
-        console.error("Unable to refresh access token", error);
-        token.accessToken = undefined;
-        token.refreshToken = undefined;
-        token.accessTokenExpires = undefined;
-        token.error = "RefreshAccessTokenError";
-      }
-
-      return token;
+          }),
+        logger: console,
+      });
     },
     async session({ session, token }) {
       session.user = {
