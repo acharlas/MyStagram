@@ -6,6 +6,12 @@ from .cookies import (
     clear_token_cookies,
     set_token_cookies,
 )
+from .default_avatar import (
+    DEFAULT_AVATAR_ASSET_PATH,
+    DEFAULT_AVATAR_OBJECT_KEY,
+    has_default_avatar_asset,
+    sync_default_avatar_asset,
+)
 from .identity_resolution import (
     normalize_email,
     registration_conflict_exists,
@@ -28,6 +34,10 @@ __all__ = [
     "MAX_ACTIVE_REFRESH_TOKENS",
     "clear_token_cookies",
     "set_token_cookies",
+    "DEFAULT_AVATAR_ASSET_PATH",
+    "DEFAULT_AVATAR_OBJECT_KEY",
+    "has_default_avatar_asset",
+    "sync_default_avatar_asset",
     "normalize_email",
     "resolve_user_from_candidates",
     "resolve_login_user",

@@ -7,6 +7,7 @@ HOST="${UVICORN_HOST:-0.0.0.0}"
 PORT="${UVICORN_PORT:-8000}"
 RELOAD="${UVICORN_RELOAD:-false}"
 PRUNE_ON_STARTUP="${DISMISSED_PRUNE_ON_STARTUP:-true}"
+SYNC_DEFAULT_AVATARS_ON_STARTUP="${SYNC_DEFAULT_AVATARS_ON_STARTUP:-true}"
 MIGRATION_MAX_RETRIES="${MIGRATION_MAX_RETRIES:-5}"
 MIGRATION_RETRY_DELAY_SECONDS="${MIGRATION_RETRY_DELAY_SECONDS:-2}"
 
@@ -41,6 +42,16 @@ while [ "$attempt" -le "$max_attempts" ]; do
   attempt=$((attempt + 1))
   sleep "$MIGRATION_RETRY_DELAY_SECONDS"
 done
+
+if [ "$SYNC_DEFAULT_AVATARS_ON_STARTUP" = "true" ]; then
+  echo "[startup] Syncing default avatars..."
+  if ! uv run python scripts/sync_default_avatars.py; then
+    echo "[startup] ERROR: default avatar sync failed"
+    exit 1
+  fi
+else
+  echo "[startup] Skipping default avatar sync (SYNC_DEFAULT_AVATARS_ON_STARTUP=${SYNC_DEFAULT_AVATARS_ON_STARTUP})"
+fi
 
 if [ "$PRUNE_ON_STARTUP" = "true" ]; then
   echo "[startup] Launching dismissed-notification prune in background..."

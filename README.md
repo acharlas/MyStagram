@@ -97,6 +97,8 @@ The sample values above are safe defaults for local development. Replace the pla
    ```bash
    docker compose exec backend uv run python scripts/seed.py
    ```
+   Seeded users are assigned the same default avatar key used by registration (`avatars/default/default-avatar.png`).
+
    Demo accounts:
    - `demo_alex` / `password123`
    - `demo_bella` / `password123`
@@ -124,6 +126,15 @@ Startup prune is bounded by default:
 - `DISMISSED_MAX_USERS_PER_RUN=200`
 - `DISMISSED_MAX_ROWS_PER_RUN=5000`
 - `DISMISSED_MAX_ELAPSED_SECONDS=30`
+
+Default avatar asset is synchronized to MinIO at backend startup from:
+- `backend/assets/default_avatars/default-avatar.png`
+
+Set `SYNC_DEFAULT_AVATARS_ON_STARTUP=false` in `.env.backend` to skip this sync step.
+You can run it manually:
+```bash
+docker compose exec backend uv run python scripts/sync_default_avatars.py
+```
 
 You can still run it manually:
 ```bash

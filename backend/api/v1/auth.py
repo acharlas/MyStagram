@@ -25,6 +25,7 @@ from db.errors import is_unique_violation
 from models import RefreshToken, User
 from services.auth import (
     ACCESS_COOKIE as SERVICE_ACCESS_COOKIE,
+    DEFAULT_AVATAR_OBJECT_KEY,
     MAX_ACTIVE_REFRESH_TOKENS as SERVICE_MAX_ACTIVE_REFRESH_TOKENS,
     REFRESH_COOKIE as SERVICE_REFRESH_COOKIE,
     clear_token_cookies,
@@ -188,6 +189,7 @@ async def register(
         password_hash=hash_password(payload.password),
         name=payload.name,
         bio=payload.bio,
+        avatar_key=DEFAULT_AVATAR_OBJECT_KEY,
     )
     session.add(user)
     try:

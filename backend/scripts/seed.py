@@ -40,6 +40,10 @@ from core import settings  # noqa: E402
 from core.security import hash_password  # noqa: E402
 from db.session import AsyncSessionMaker  # noqa: E402
 from models import Comment, Follow, Like, Post, User  # noqa: E402
+from services.auth import (  # noqa: E402
+    DEFAULT_AVATAR_OBJECT_KEY,
+    sync_default_avatar_asset,
+)
 from services.storage import ensure_bucket, get_minio_client  # noqa: E402
 
 
@@ -394,6 +398,10 @@ async def get_or_create_user(session, payload: SeedUser) -> User:
     result = await session.execute(select(User).where(_eq(User.username, payload.username)))
     user = result.scalar_one_or_none()
     if user:
+        if not user.avatar_key:
+            user.avatar_key = DEFAULT_AVATAR_OBJECT_KEY
+            session.add(user)
+            await session.flush()
         return user
 
     user = User(
@@ -402,6 +410,7 @@ async def get_or_create_user(session, payload: SeedUser) -> User:
         name=payload.name,
         bio=payload.bio,
         password_hash=hash_password(DEFAULT_PASSWORD),
+        avatar_key=DEFAULT_AVATAR_OBJECT_KEY,
     )
     session.add(user)
     await session.flush()
@@ -532,6 +541,16 @@ async def ensure_engagement(
 
 async def seed() -> None:
     plan = build_seed_plan()
+    try:
+        sync_status = sync_default_avatar_asset()
+        print(
+            "Default avatar synced:",
+            f"key={DEFAULT_AVATAR_OBJECT_KEY}",
+            f"status={sync_status}",
+        )
+    except Exception as exc:
+        print(f"WARNING: Could not sync default avatar asset: {exc}")
+
     ensure_seed_post_media(plan.posts)
 
     async with AsyncSessionMaker() as session:

@@ -45,6 +45,7 @@ async def test_register_creates_user(async_client, db_session: AsyncSession):
     )
     user = result.scalar_one()
     assert user.password_hash != payload["password"]
+    assert user.avatar_key == "avatars/default/default-avatar.png"
 
 
 @pytest.mark.asyncio

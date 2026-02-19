@@ -57,7 +57,7 @@ async def test_get_user_profile(async_client: AsyncClient):
     body = response.json()
     assert body["username"] == payload["username"]
     assert "email" not in body
-    assert body["avatar_key"] is None
+    assert body["avatar_key"] == "avatars/default/default-avatar.png"
 
 
 @pytest.mark.asyncio
