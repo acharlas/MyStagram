@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { getServerSession, type Session } from "next-auth";
 import { getToken } from "next-auth/jwt";
 
+import { refreshTokensWithCoordinator } from "@/lib/auth/refresh-coordinator";
 import { resolveSessionTokenState } from "@/lib/auth/access-token";
 import { authOptions } from "../../app/api/auth/[...nextauth]/route";
 
@@ -9,12 +10,6 @@ type SessionGetter = typeof getServerSession;
 type TokenGetter = typeof getToken;
 type NextAuthTokenRequest = Parameters<typeof getToken>[0]["req"];
 type Fetcher = typeof fetch;
-type RefreshTokenResponse = {
-  access_token?: unknown;
-  refresh_token?: unknown;
-};
-const API_BASE_URL = process.env.BACKEND_API_URL ?? "http://backend:8000";
-const inFlightServerRefreshes = new Map<string, Promise<string | undefined>>();
 
 type CookieStore = {
   getAll(): Array<{ name: string; value: string }>;
@@ -76,55 +71,6 @@ function withAccessToken(
   };
 }
 
-function buildApiUrl(path: string) {
-  return new URL(path, API_BASE_URL).toString();
-}
-
-async function refreshAccessTokenForServer(
-  refreshToken: string,
-  fetchImpl: Fetcher,
-): Promise<string | undefined> {
-  try {
-    const response = await fetchImpl(buildApiUrl("/api/v1/auth/refresh"), {
-      method: "POST",
-      headers: {
-        Cookie: `refresh_token=${refreshToken}`,
-      },
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      return undefined;
-    }
-
-    const payload = (await response.json()) as RefreshTokenResponse;
-    if (typeof payload.access_token === "string" && payload.access_token) {
-      return payload.access_token;
-    }
-
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function refreshAccessTokenForServerWithGuard(
-  refreshToken: string,
-  fetchImpl: Fetcher,
-): Promise<string | undefined> {
-  const inFlight = inFlightServerRefreshes.get(refreshToken);
-  if (inFlight) {
-    return inFlight;
-  }
-
-  const refreshPromise = (async () =>
-    refreshAccessTokenForServer(refreshToken, fetchImpl))().finally(() => {
-    inFlightServerRefreshes.delete(refreshToken);
-  });
-
-  inFlightServerRefreshes.set(refreshToken, refreshPromise);
-  return refreshPromise;
-}
-
 export async function getSessionServer(
   getter: SessionGetter = getServerSession,
   deps: SessionDependencies = {},
@@ -165,11 +111,10 @@ export async function getSessionServer(
     }
 
     if (tokenState === "recoverable" && refreshToken) {
-      const refreshedAccessToken = await refreshAccessTokenForServerWithGuard(
-        refreshToken,
+      const refreshedTokens = await refreshTokensWithCoordinator(refreshToken, {
         fetchImpl,
-      );
-      return withAccessToken(session, refreshedAccessToken);
+      });
+      return withAccessToken(session, refreshedTokens.access_token);
     }
 
     return withAccessToken(session, undefined);

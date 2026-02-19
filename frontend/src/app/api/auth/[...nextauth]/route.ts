@@ -8,11 +8,15 @@ import {
   RATE_LIMIT_CLIENT_HEADER,
   RATE_LIMIT_SIGNATURE_HEADER,
 } from "@/lib/auth/rate-limit-client";
-
-type TokenResponse = {
-  access_token: string;
-  refresh_token: string;
-};
+import {
+  clearRefreshCoordinatorStateForTests,
+  getRecentRefreshResultCapacityForTests as getRefreshCoordinatorCapacityForTests,
+  getRecentRefreshResultsSizeForTests as getRefreshCoordinatorRecentSizeForTests,
+  getRecentRefreshResultTtlMsForTests as getRefreshCoordinatorTtlMsForTests,
+  refreshTokensWithCoordinator,
+  RefreshTokenRequestError,
+  type RefreshTokenResponse,
+} from "@/lib/auth/refresh-coordinator";
 
 type BackendProfile = {
   id: string;
@@ -31,7 +35,6 @@ export type AuthorizedUser = {
 const API_BASE_URL = process.env.BACKEND_API_URL ?? "http://backend:8000";
 const ACCESS_TOKEN_FALLBACK_LIFETIME_MS = 14 * 60 * 1000;
 const ACCESS_TOKEN_REFRESH_SKEW_MS = 5 * 1000;
-const inFlightRefreshes = new Map<string, Promise<TokenResponse>>();
 
 function buildApiUrl(path: string) {
   return new URL(path, API_BASE_URL).toString();
@@ -67,18 +70,8 @@ function readAccessTokenExpiry(accessToken: string): number {
   return Date.now() + ACCESS_TOKEN_FALLBACK_LIFETIME_MS;
 }
 
-class RefreshAccessTokenError extends Error {
-  readonly status: number;
-
-  constructor(status: number, message: string) {
-    super(message);
-    this.name = "RefreshAccessTokenError";
-    this.status = status;
-  }
-}
-
 function isTransientRefreshFailure(error: unknown): boolean {
-  if (error instanceof RefreshAccessTokenError) {
+  if (error instanceof RefreshTokenRequestError) {
     return error.status === 429 || error.status >= 500;
   }
   // Network-level fetch failures should not immediately invalidate session state.
@@ -95,55 +88,6 @@ function hasStillValidAccessToken(
     Number.isFinite(expiresAtMs) &&
     expiresAtMs > Date.now()
   );
-}
-
-async function refreshAccessToken(
-  refreshToken: string,
-): Promise<TokenResponse> {
-  const response = await fetch(buildApiUrl("/api/v1/auth/refresh"), {
-    method: "POST",
-    headers: {
-      Cookie: `refresh_token=${refreshToken}`,
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    let detail = `Refresh failed with status ${response.status}`;
-    try {
-      const payload = (await response.json()) as { detail?: unknown };
-      if (typeof payload?.detail === "string" && payload.detail.trim()) {
-        detail = payload.detail;
-      }
-    } catch {
-      // Ignore parse errors and keep generic detail.
-    }
-    throw new RefreshAccessTokenError(response.status, detail);
-  }
-
-  const payload = (await response.json()) as TokenResponse;
-  if (!payload.access_token || !payload.refresh_token) {
-    throw new Error("Refresh response is missing authentication tokens");
-  }
-  return payload;
-}
-
-async function refreshAccessTokenWithConcurrencyGuard(
-  refreshToken: string,
-): Promise<TokenResponse> {
-  const inFlight = inFlightRefreshes.get(refreshToken);
-  if (inFlight) {
-    return inFlight;
-  }
-
-  const refreshPromise = (async () => {
-    return refreshAccessToken(refreshToken);
-  })().finally(() => {
-    inFlightRefreshes.delete(refreshToken);
-  });
-
-  inFlightRefreshes.set(refreshToken, refreshPromise);
-  return refreshPromise;
 }
 
 export async function loginWithCredentials(username: string, password: string) {
@@ -176,7 +120,7 @@ export async function loginWithCredentialsWithClientKey(
     throw new Error("Invalid credentials");
   }
 
-  const payload = (await response.json()) as TokenResponse;
+  const payload = (await response.json()) as RefreshTokenResponse;
   if (!payload.access_token || !payload.refresh_token) {
     throw new Error("Missing authentication tokens");
   }
@@ -310,7 +254,9 @@ export const authOptions: NextAuthOptions = {
 
       try {
         const refreshedTokens =
-          await refreshAccessTokenWithConcurrencyGuard(currentRefreshToken);
+          await refreshTokensWithCoordinator(currentRefreshToken, {
+            apiBaseUrl: API_BASE_URL,
+          });
         token.accessToken = refreshedTokens.access_token;
         token.refreshToken = refreshedTokens.refresh_token;
         token.accessTokenExpires = readAccessTokenExpiry(
@@ -357,9 +303,17 @@ export const authOptions: NextAuthOptions = {
 };
 
 export const __internal = {
-  clearRecentRefreshResultsForTests() {},
+  clearRecentRefreshResultsForTests() {
+    clearRefreshCoordinatorStateForTests();
+  },
   getRecentRefreshResultsSizeForTests() {
-    return 0;
+    return getRefreshCoordinatorRecentSizeForTests();
+  },
+  getRecentRefreshResultTtlMsForTests() {
+    return getRefreshCoordinatorTtlMsForTests();
+  },
+  getRecentRefreshResultCapacityForTests() {
+    return getRefreshCoordinatorCapacityForTests();
   },
 };
 
