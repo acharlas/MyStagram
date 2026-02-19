@@ -13,9 +13,9 @@ import {
   getRecentRefreshResultCapacityForTests as getRefreshCoordinatorCapacityForTests,
   getRecentRefreshResultsSizeForTests as getRefreshCoordinatorRecentSizeForTests,
   getRecentRefreshResultTtlMsForTests as getRefreshCoordinatorTtlMsForTests,
-  refreshTokensWithCoordinator,
   RefreshTokenRequestError,
   type RefreshTokenResponse,
+  refreshTokensWithCoordinator,
 } from "@/lib/auth/refresh-coordinator";
 
 type BackendProfile = {
@@ -253,10 +253,12 @@ export const authOptions: NextAuthOptions = {
       }
 
       try {
-        const refreshedTokens =
-          await refreshTokensWithCoordinator(currentRefreshToken, {
+        const refreshedTokens = await refreshTokensWithCoordinator(
+          currentRefreshToken,
+          {
             apiBaseUrl: API_BASE_URL,
-          });
+          },
+        );
         token.accessToken = refreshedTokens.access_token;
         token.refreshToken = refreshedTokens.refresh_token;
         token.accessTokenExpires = readAccessTokenExpiry(

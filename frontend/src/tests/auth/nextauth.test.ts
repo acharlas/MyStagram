@@ -778,12 +778,16 @@ describe("JWT and session callbacks", () => {
         refreshToken: "refresh-token-ttl-next",
         error: undefined,
       });
-      expect(authModule.__internal.getRecentRefreshResultsSizeForTests()).toBe(1);
+      expect(authModule.__internal.getRecentRefreshResultsSizeForTests()).toBe(
+        1,
+      );
 
       vi.advanceTimersByTime(
         authModule.__internal.getRecentRefreshResultTtlMsForTests() + 1,
       );
-      expect(authModule.__internal.getRecentRefreshResultsSizeForTests()).toBe(0);
+      expect(authModule.__internal.getRecentRefreshResultsSizeForTests()).toBe(
+        0,
+      );
 
       const secondAttempt = await authOptions.callbacks?.jwt?.({
         token: {
@@ -811,7 +815,8 @@ describe("JWT and session callbacks", () => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
     const refreshedAccessToken = buildJwtWithExp(nowSeconds + 600);
-    const capacity = authModule.__internal.getRecentRefreshResultCapacityForTests();
+    const capacity =
+      authModule.__internal.getRecentRefreshResultCapacityForTests();
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({

@@ -1,9 +1,8 @@
 import { cookies } from "next/headers";
 import { getServerSession, type Session } from "next-auth";
 import { getToken } from "next-auth/jwt";
-
-import { refreshTokensWithCoordinator } from "@/lib/auth/refresh-coordinator";
 import { resolveSessionTokenState } from "@/lib/auth/access-token";
+import { refreshTokensWithCoordinator } from "@/lib/auth/refresh-coordinator";
 import { authOptions } from "../../app/api/auth/[...nextauth]/route";
 
 type SessionGetter = typeof getServerSession;

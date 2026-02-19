@@ -58,7 +58,9 @@ function enforceRecentRefreshResultLimit(): void {
   }
 }
 
-function parseRefreshTokenResponse(payload: unknown): RefreshTokenResponse | null {
+function parseRefreshTokenResponse(
+  payload: unknown,
+): RefreshTokenResponse | null {
   if (!payload || typeof payload !== "object") {
     return null;
   }
@@ -91,13 +93,16 @@ async function requestRefreshTokens(
   fetchImpl: Fetcher,
   apiBaseUrl: string,
 ): Promise<RefreshTokenResponse> {
-  const response = await fetchImpl(buildApiUrl("/api/v1/auth/refresh", apiBaseUrl), {
-    method: "POST",
-    headers: {
-      Cookie: `refresh_token=${refreshToken}`,
+  const response = await fetchImpl(
+    buildApiUrl("/api/v1/auth/refresh", apiBaseUrl),
+    {
+      method: "POST",
+      headers: {
+        Cookie: `refresh_token=${refreshToken}`,
+      },
+      cache: "no-store",
     },
-    cache: "no-store",
-  });
+  );
 
   if (!response.ok) {
     let detail = `Refresh failed with status ${response.status}`;
@@ -141,7 +146,11 @@ export async function refreshTokensWithCoordinator(
   const apiBaseUrl =
     options.apiBaseUrl ?? process.env.BACKEND_API_URL ?? DEFAULT_API_BASE_URL;
   const refreshPromise = (async () => {
-    const tokens = await requestRefreshTokens(refreshToken, fetchImpl, apiBaseUrl);
+    const tokens = await requestRefreshTokens(
+      refreshToken,
+      fetchImpl,
+      apiBaseUrl,
+    );
     recentRefreshResults.set(refreshTokenKey, {
       tokens,
       expiresAtMs: Date.now() + RECENT_REFRESH_RESULT_TTL_MS,
