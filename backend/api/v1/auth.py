@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
-from datetime import datetime, timedelta, timezone
 from collections.abc import Sequence
-from typing import Any, Callable, Literal, cast
+from datetime import datetime, timezone
+from typing import Any, Callable, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
-from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
@@ -22,23 +20,32 @@ from core import (
     decode_token,
     hash_password,
     needs_rehash,
-    settings,
-    verify_password,
 )
 from db.errors import is_unique_violation
 from models import RefreshToken, User
+from services.auth import (
+    ACCESS_COOKIE as SERVICE_ACCESS_COOKIE,
+    MAX_ACTIVE_REFRESH_TOKENS as SERVICE_MAX_ACTIVE_REFRESH_TOKENS,
+    REFRESH_COOKIE as SERVICE_REFRESH_COOKIE,
+    clear_token_cookies,
+    enforce_refresh_token_limit,
+    ensure_aware,
+    get_refresh_token,
+    hash_refresh_token,
+    normalize_email,
+    registration_conflict_exists,
+    resolve_login_user,
+    resolve_user_from_candidates,
+    revoke_refresh_token,
+    set_token_cookies,
+    store_refresh_token,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-ACCESS_COOKIE = "access_token"
-REFRESH_COOKIE = "refresh_token"
-COOKIE_PATH = "/"
-COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
-COOKIE_SECURE = (
-    settings.app_env.strip().lower() not in {"local", "test"}
-    and not settings.allow_insecure_http_cookies
-)
-MAX_ACTIVE_REFRESH_TOKENS = 5
+ACCESS_COOKIE = SERVICE_ACCESS_COOKIE
+REFRESH_COOKIE = SERVICE_REFRESH_COOKIE
+MAX_ACTIVE_REFRESH_TOKENS = SERVICE_MAX_ACTIVE_REFRESH_TOKENS
 MAX_PROFILE_BIO_LENGTH = 500
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._]{1,28}[A-Za-z0-9_]$")
 
@@ -48,11 +55,7 @@ def _eq(column: Any, value: Any) -> ColumnElement[bool]:
 
 
 def _normalize_email(value: str) -> str:
-    return value.strip().lower()
-
-
-def _asc(column: Any) -> Any:
-    return cast(Any, column).asc()
+    return normalize_email(value)
 
 
 def _resolve_user_from_candidates(
@@ -62,19 +65,12 @@ def _resolve_user_from_candidates(
     preferred_identifier: str | None = None,
     identifier_getter: Callable[[User], str | None] | None = None,
 ) -> User | None:
-    ordered_candidates = candidates
-    if preferred_identifier is not None and identifier_getter is not None:
-        ordered_candidates = sorted(
-            candidates,
-            key=lambda candidate: 0
-            if identifier_getter(candidate) == preferred_identifier
-            else 1,
-        )
-
-    for candidate in ordered_candidates:
-        if verify_password(password, candidate.password_hash):
-            return candidate
-    return None
+    return resolve_user_from_candidates(
+        candidates,
+        password=password,
+        preferred_identifier=preferred_identifier,
+        identifier_getter=identifier_getter,
+    )
 
 
 class RegisterRequest(BaseModel):
@@ -119,21 +115,11 @@ class TokenResponse(BaseModel):
 
 
 def _hash_refresh_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def _access_token_ttl() -> timedelta:
-    return timedelta(minutes=settings.access_token_expire_minutes)
-
-
-def _refresh_token_ttl() -> timedelta:
-    return timedelta(minutes=settings.refresh_token_expire_minutes)
+    return hash_refresh_token(token)
 
 
 def _ensure_aware(dt: datetime) -> datetime:
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+    return ensure_aware(dt)
 
 
 async def _store_refresh_token(
@@ -141,37 +127,22 @@ async def _store_refresh_token(
     user_id: str,
     token: str,
 ) -> RefreshToken:
-    payload = decode_token(token)
-    token_obj = RefreshToken(
-        user_id=user_id,
-        token_hash=_hash_refresh_token(token),
-        issued_at=datetime.fromtimestamp(payload["iat"], tz=timezone.utc),
-        expires_at=datetime.fromtimestamp(payload["exp"], tz=timezone.utc),
+    return await store_refresh_token(
+        session,
+        user_id,
+        token,
+        max_active_tokens=MAX_ACTIVE_REFRESH_TOKENS,
+        # Preserve monkeypatching behavior in tests that patch api.v1.auth.decode_token.
+        decode_token_fn=decode_token,
     )
-    session.add(token_obj)
-    await session.flush()
-    await _enforce_refresh_token_limit(session, user_id)
-    return token_obj
 
 
 async def _enforce_refresh_token_limit(session: AsyncSession, user_id: str) -> None:
-    revoked_column = cast(Any, RefreshToken.revoked_at)
-    issued_at_column = cast(Any, RefreshToken.issued_at)
-
-    result = await session.execute(
-        select(RefreshToken)
-        .where(
-            _eq(RefreshToken.user_id, user_id),
-            cast(ColumnElement[bool], revoked_column.is_(None)),
-        )
-        .order_by(issued_at_column.desc())
+    await enforce_refresh_token_limit(
+        session,
+        user_id,
+        max_active_tokens=MAX_ACTIVE_REFRESH_TOKENS,
     )
-    tokens = result.scalars().all()
-    surplus = tokens[MAX_ACTIVE_REFRESH_TOKENS:]
-    for token in surplus:
-        await session.delete(token)
-    if surplus:
-        await session.flush()
 
 
 async def _get_refresh_token(
@@ -180,67 +151,19 @@ async def _get_refresh_token(
     *,
     lock_for_update: bool = False,
 ) -> RefreshToken:
-    hashed = _hash_refresh_token(token)
-    stmt = select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed))
-    if lock_for_update:
-        stmt = stmt.with_for_update()
-    result = await session.execute(stmt)
-    token_obj = result.scalar_one_or_none()
-    if token_obj is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid refresh token",
-        )
-    if token_obj.revoked_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token revoked",
-        )
-    if _ensure_aware(token_obj.expires_at) <= datetime.now(timezone.utc):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token expired",
-        )
-    return token_obj
+    return await get_refresh_token(
+        session,
+        token,
+        lock_for_update=lock_for_update,
+    )
 
 
 def _set_token_cookies(response: Response, access_token: str, refresh_token: str) -> None:
-    access_max_age = int(_access_token_ttl().total_seconds())
-    refresh_max_age = int(_refresh_token_ttl().total_seconds())
-
-    response.set_cookie(
-        key=ACCESS_COOKIE,
-        value=access_token,
-        httponly=True,
-        secure=COOKIE_SECURE,
-        samesite=COOKIE_SAMESITE,
-        max_age=access_max_age,
-        path=COOKIE_PATH,
-    )
-    response.set_cookie(
-        key=REFRESH_COOKIE,
-        value=refresh_token,
-        httponly=True,
-        secure=COOKIE_SECURE,
-        samesite=COOKIE_SAMESITE,
-        max_age=refresh_max_age,
-        path=COOKIE_PATH,
-    )
+    set_token_cookies(response, access_token, refresh_token)
 
 
 def _clear_token_cookies(response: Response) -> None:
-    response.delete_cookie(
-        key=ACCESS_COOKIE,
-        path=COOKIE_PATH,
-        secure=COOKIE_SECURE,
-        samesite=COOKIE_SAMESITE,
-    )
-    response.delete_cookie(
-        key=REFRESH_COOKIE,
-        path=COOKIE_PATH,
-        secure=COOKIE_SECURE,
-        samesite=COOKIE_SAMESITE,
-    )
+    clear_token_cookies(response)
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED, response_model=UserResponse)
@@ -249,25 +172,11 @@ async def register(
     session: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     normalized_email = _normalize_email(str(payload.email))
-    lowered_email_column = cast(Any, func.lower(cast(Any, User.email)))
-    email_alias_column = cast(Any, User.email_login_alias)
-    lowered_username_column = cast(Any, func.lower(cast(Any, User.username)))
-    existing = await session.execute(
-        select(User)
-        .where(
-            or_(
-                _eq(User.username, payload.username),
-                _eq(lowered_email_column, normalized_email),
-                # Preserve ownership of legacy login aliases produced by
-                # case-insensitive email deduplication migration.
-                _eq(email_alias_column, normalized_email),
-                # Guard against legacy accounts that used email-like usernames.
-                _eq(lowered_username_column, normalized_email),
-            )
-        )
-        .limit(1)
-    )
-    if existing.scalar_one_or_none() is not None:
+    if await registration_conflict_exists(
+        session,
+        username=payload.username,
+        normalized_email=normalized_email,
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="User with that username or email already exists",
@@ -301,57 +210,11 @@ async def login(
     session: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
     identifier = payload.username.strip()
-    user: User | None = None
-    # Deterministic resolution:
-    # - if it looks like an email, prefer email match
-    # - fallback to migration login aliases and legacy email-like usernames
-    if "@" in identifier:
-        lowered_identifier = _normalize_email(identifier)
-        lowered_email_column = cast(Any, func.lower(cast(Any, User.email)))
-        email_result = await session.execute(
-            select(User)
-            .where(_eq(lowered_email_column, lowered_identifier))
-            .order_by(_asc(User.created_at), _asc(User.id))
-        )
-        user = _resolve_user_from_candidates(
-            email_result.scalars().all(),
-            password=payload.password,
-            preferred_identifier=identifier,
-            identifier_getter=lambda candidate: candidate.email,
-        )
-
-        if user is None:
-            alias_result = await session.execute(
-                select(User)
-                .where(_eq(User.email_login_alias, lowered_identifier))
-                .order_by(_asc(User.created_at), _asc(User.id))
-            )
-            user = _resolve_user_from_candidates(
-                alias_result.scalars().all(),
-                password=payload.password,
-                preferred_identifier=lowered_identifier,
-                identifier_getter=lambda candidate: candidate.email_login_alias,
-            )
-
-        if user is None:
-            legacy_result = await session.execute(
-                select(User)
-                .where(_eq(func.lower(cast(Any, User.username)), lowered_identifier))
-                .order_by(_asc(User.created_at), _asc(User.id))
-            )
-            user = _resolve_user_from_candidates(
-                legacy_result.scalars().all(),
-                password=payload.password,
-                preferred_identifier=identifier,
-                identifier_getter=lambda candidate: candidate.username,
-            )
-    else:
-        result = await session.execute(
-            select(User).where(_eq(User.username, identifier)).limit(1)
-        )
-        user = result.scalar_one_or_none()
-        if user is not None and not verify_password(payload.password, user.password_hash):
-            user = None
+    user = await resolve_login_user(
+        session,
+        identifier=identifier,
+        password=payload.password,
+    )
 
     if user is None:
         raise HTTPException(
@@ -369,7 +232,6 @@ async def login(
         )
 
     user_id = user.id
-
     access_token = create_access_token(str(user_id))
     refresh_token = create_refresh_token(str(user_id))
 
@@ -455,13 +317,7 @@ async def logout(
 ) -> dict[str, Any]:
     refresh_token = request.cookies.get(REFRESH_COOKIE)
     if refresh_token:
-        hashed = _hash_refresh_token(refresh_token)
-        result = await session.execute(
-            select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed))
-        )
-        token_obj = result.scalar_one_or_none()
-        if token_obj and token_obj.revoked_at is None:
-            token_obj.revoked_at = datetime.now(timezone.utc)
+        await revoke_refresh_token(session, refresh_token)
         await session.commit()
 
     _clear_token_cookies(response)
