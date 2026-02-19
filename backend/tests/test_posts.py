@@ -144,7 +144,7 @@ async def test_create_post_rejects_too_long_caption(
         data={"caption": "x" * 2201},
         files=files,
     )
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
     assert "at most 2200 characters" in response.json()["detail"]
 
 

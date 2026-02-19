@@ -122,7 +122,7 @@ async def create_post(
         normalized_caption = caption.strip()
         if len(normalized_caption) > MAX_POST_CAPTION_LENGTH:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Caption must be at most {MAX_POST_CAPTION_LENGTH} characters",
             )
         if normalized_caption == "":
@@ -389,7 +389,7 @@ async def create_comment(
     )
     if not comment.text:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Comment text cannot be empty",
         )
 
