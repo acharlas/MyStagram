@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from models import Follow, Like, Post, User
+from services.auth import DEFAULT_AVATAR_OBJECT_KEY
 from .pagination import set_next_offset_header
 
 
@@ -29,6 +30,7 @@ class PostResponse(BaseModel):
     author_id: str
     author_name: str | None = None
     author_username: str | None = None
+    author_avatar_key: str | None = None
     image_key: str
     caption: str | None = None
     like_count: int = 0
@@ -40,6 +42,7 @@ class PostResponse(BaseModel):
         post: Post,
         author_name: str | None = None,
         author_username: str | None = None,
+        author_avatar_key: str | None = None,
         *,
         like_count: int = 0,
         viewer_has_liked: bool = False,
@@ -51,6 +54,7 @@ class PostResponse(BaseModel):
             author_id=post.author_id,
             author_name=author_name,
             author_username=author_username,
+            author_avatar_key=author_avatar_key or DEFAULT_AVATAR_OBJECT_KEY,
             image_key=post.image_key,
             caption=post.caption,
             like_count=like_count,
@@ -109,10 +113,16 @@ async def build_home_feed(
     post_entity = cast(Any, Post)
     author_name_column = cast(ColumnElement[str | None], User.name)
     author_username_column = cast(ColumnElement[str | None], User.username)
+    author_avatar_key_column = cast(ColumnElement[str | None], User.avatar_key)
     post_created_at = cast(Any, Post.created_at)
     post_id_column = cast(Any, Post.id)
     query = (
-        select(post_entity, author_name_column, author_username_column)
+        select(
+            post_entity,
+            author_name_column,
+            author_username_column,
+            author_avatar_key_column,
+        )
         .join(User, _eq(User.id, Post.author_id))
         .join(Follow, _eq(Follow.followee_id, Post.author_id))
         .where(_eq(Follow.follower_id, current_user.id))
@@ -134,15 +144,16 @@ async def build_home_feed(
             rows = rows[:limit]
         set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
 
-    post_ids = [post.id for post, _name, _username in rows if post.id is not None]
+    post_ids = [post.id for post, _name, _username, _avatar_key in rows if post.id is not None]
     count_map, liked_set = await collect_like_meta(session, post_ids, current_user.id)
     return [
         PostResponse.from_post(
             post,
             author_name=author_name,
             author_username=username,
+            author_avatar_key=avatar_key,
             like_count=count_map.get(post.id, 0) if post.id is not None else 0,
             viewer_has_liked=post.id in liked_set if post.id is not None else False,
         )
-        for post, author_name, username in rows
+        for post, author_name, username, avatar_key in rows
     ]

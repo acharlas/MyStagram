@@ -15,6 +15,7 @@ from sqlalchemy.sql import ColumnElement
 
 from models import Follow, Post, User
 from api.v1 import feed as feed_api
+from services.auth import DEFAULT_AVATAR_OBJECT_KEY
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -77,6 +78,7 @@ async def test_home_feed_returns_followee_posts(
     assert len(body) == 3
     captions = [item["caption"] for item in body]
     assert captions == ["Post 0", "Post 1", "Post 2"]
+    assert all(item["author_avatar_key"] == DEFAULT_AVATAR_OBJECT_KEY for item in body)
 
 
 @pytest.mark.asyncio
@@ -238,3 +240,4 @@ async def test_home_feed_direct_call_returns_posts(db_session: AsyncSession):
     )
     assert len(result) == 1
     assert result[0].caption == "Direct"
+    assert result[0].author_avatar_key == DEFAULT_AVATAR_OBJECT_KEY

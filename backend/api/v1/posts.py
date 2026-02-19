@@ -180,6 +180,7 @@ async def create_post(
         post,
         author_name=current_user.name,
         author_username=current_user.username,
+        author_avatar_key=current_user.avatar_key,
         like_count=0,
         viewer_has_liked=False,
     )
@@ -228,6 +229,7 @@ async def list_posts(
             post,
             author_name=current_user.name,
             author_username=current_user.username,
+            author_avatar_key=current_user.avatar_key,
             like_count=count_map.get(post.id, 0) if post.id is not None else 0,
             viewer_has_liked=post.id in liked_set if post.id is not None else False,
         )
@@ -268,8 +270,14 @@ async def get_post(
     post_entity = cast(Any, Post)
     author_name_column = cast(ColumnElement[str | None], User.name)
     author_username_column = cast(ColumnElement[str | None], User.username)
+    author_avatar_key_column = cast(ColumnElement[str | None], User.avatar_key)
     result = await session.execute(
-        select(post_entity, author_name_column, author_username_column)
+        select(
+            post_entity,
+            author_name_column,
+            author_username_column,
+            author_avatar_key_column,
+        )
         .join(User, _eq(User.id, Post.author_id))
         .where(_eq(Post.id, post_id))
         .limit(1)
@@ -278,7 +286,7 @@ async def get_post(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
-    post, author_name, author_username = row
+    post, author_name, author_username, author_avatar_key = row
     await require_post_view_access(
         session,
         viewer_id=viewer_id,
@@ -297,6 +305,7 @@ async def get_post(
         post,
         author_name=author_name,
         author_username=author_username,
+        author_avatar_key=author_avatar_key,
         like_count=like_count,
         viewer_has_liked=viewer_has_liked,
     )

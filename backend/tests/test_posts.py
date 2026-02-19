@@ -18,6 +18,7 @@ from sqlalchemy.sql import ColumnElement
 from core.config import settings
 from models import Comment, Follow, Like, Post, User
 from api.v1 import posts as posts_api
+from services.auth import DEFAULT_AVATAR_OBJECT_KEY
 from services import storage
 
 
@@ -81,6 +82,7 @@ async def test_create_and_get_post(
     created = create_response.json()
     assert created["caption"] == "First shot!"
     assert created["image_key"].endswith(".jpg")
+    assert created["author_avatar_key"] == DEFAULT_AVATAR_OBJECT_KEY
     assert created["like_count"] == 0
     assert created["viewer_has_liked"] is False
 
@@ -94,6 +96,7 @@ async def test_create_and_get_post(
     get_response = await async_client.get(f"/api/v1/posts/{post_id}")
     assert get_response.status_code == 200
     assert get_response.json()["id"] == post_id
+    assert get_response.json()["author_avatar_key"] == DEFAULT_AVATAR_OBJECT_KEY
     assert get_response.json()["like_count"] == 0
 
     list_response = await async_client.get("/api/v1/posts")
@@ -101,6 +104,7 @@ async def test_create_and_get_post(
     assert list_response.headers.get("x-next-offset") is None
     listed = list_response.json()
     assert len(listed) == 1
+    assert listed[0]["author_avatar_key"] == DEFAULT_AVATAR_OBJECT_KEY
     assert listed[0]["like_count"] == 0
     assert listed[0]["viewer_has_liked"] is False
 
