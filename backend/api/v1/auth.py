@@ -173,11 +173,14 @@ async def _enforce_refresh_token_limit(session: AsyncSession, user_id: str) -> N
 async def _get_refresh_token(
     session: AsyncSession,
     token: str,
+    *,
+    lock_for_update: bool = False,
 ) -> RefreshToken:
     hashed = _hash_refresh_token(token)
-    result = await session.execute(
-        select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed))
-    )
+    stmt = select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed))
+    if lock_for_update:
+        stmt = stmt.with_for_update()
+    result = await session.execute(stmt)
     token_obj = result.scalar_one_or_none()
     if token_obj is None:
         raise HTTPException(
@@ -400,7 +403,11 @@ async def refresh_tokens(
             detail="Invalid refresh token",
         )
 
-    token_obj = await _get_refresh_token(session, refresh_token)
+    token_obj = await _get_refresh_token(
+        session,
+        refresh_token,
+        lock_for_update=True,
+    )
     sub_raw = payload.get("sub")
     if isinstance(sub_raw, str):
         user_id = sub_raw
@@ -419,10 +426,21 @@ async def refresh_tokens(
         )
 
     access_token = create_access_token(str(user_id))
-    # Keep refresh tokens stable for session continuity with stateless frontend JWT.
-    # Rotation requires cookie re-encryption on every server-side refresh path.
-    _set_token_cookies(response, access_token, refresh_token)
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    new_refresh_token = create_refresh_token(str(user_id))
+
+    token_obj.revoked_at = datetime.now(timezone.utc)
+    await _store_refresh_token(session, user_id, new_refresh_token)
+    try:
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to refresh tokens",
+        ) from exc
+
+    _set_token_cookies(response, access_token, new_refresh_token)
+    return TokenResponse(access_token=access_token, refresh_token=new_refresh_token)
 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)

@@ -291,7 +291,9 @@ async def test_login_email_alias_still_authenticates_displaced_account(
 
 
 @pytest.mark.asyncio
-async def test_refresh_keeps_refresh_token_active(async_client, db_session: AsyncSession):
+async def test_refresh_rotates_refresh_token_and_revokes_previous_token(
+    async_client, db_session: AsyncSession
+):
     payload = build_payload()
     await async_client.post("/api/v1/auth/register", json=payload)
     login_response = await async_client.post(
@@ -306,14 +308,25 @@ async def test_refresh_keeps_refresh_token_active(async_client, db_session: Asyn
     refresh_response = await async_client.post("/api/v1/auth/refresh")
     assert refresh_response.status_code == 200
     refreshed_token = refresh_response.json()["refresh_token"]
-    assert refreshed_token == old_refresh
+    assert refreshed_token != old_refresh
 
-    hashed = hashlib.sha256(refreshed_token.encode()).hexdigest()
-    stored_result = await db_session.execute(
-        select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed))
+    old_hashed = hashlib.sha256(old_refresh.encode()).hexdigest()
+    old_result = await db_session.execute(
+        select(RefreshToken).where(_eq(RefreshToken.token_hash, old_hashed))
     )
-    stored_token = stored_result.scalar_one()
-    assert stored_token.revoked_at is None
+    old_stored_token = old_result.scalar_one()
+    assert old_stored_token.revoked_at is not None
+
+    new_hashed = hashlib.sha256(refreshed_token.encode()).hexdigest()
+    new_result = await db_session.execute(
+        select(RefreshToken).where(_eq(RefreshToken.token_hash, new_hashed))
+    )
+    new_stored_token = new_result.scalar_one()
+    assert new_stored_token.revoked_at is None
+
+    async_client.cookies.set("refresh_token", old_refresh)
+    replay_response = await async_client.post("/api/v1/auth/refresh")
+    assert replay_response.status_code == 401
 
 
 @pytest.mark.asyncio
