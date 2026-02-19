@@ -7,7 +7,6 @@ import { CommentIcon } from "@/components/ui/icons";
 import { fetchPostComments, fetchPostDetail } from "@/lib/api/posts";
 import { getSessionServer } from "@/lib/auth/session";
 import { buildImageUrl } from "@/lib/image";
-import { sanitizeHtml } from "@/lib/sanitize";
 
 type PostPageProps = { params: Promise<{ postId: string }> };
 
@@ -33,7 +32,6 @@ export default async function PostDetailPage({ params }: PostPageProps) {
     post.author_name ?? post.author_username ?? post.author_id;
   const authorUsername = post.author_username ?? undefined;
   const imageUrl = buildImageUrl(post.image_key);
-  const safeCaption = post.caption ? sanitizeHtml(post.caption) : "";
 
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-5 py-2 lg:h-[84vh] lg:flex-row lg:gap-4">
@@ -68,7 +66,7 @@ export default async function PostDetailPage({ params }: PostPageProps) {
             </p>
           )}
           <p className="ui-text-muted mt-2 text-sm leading-relaxed">
-            {safeCaption || "Aucune légende"}
+            {post.caption || "Aucune légende"}
           </p>
         </header>
 

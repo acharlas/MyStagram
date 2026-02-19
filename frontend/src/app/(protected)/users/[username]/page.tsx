@@ -13,7 +13,6 @@ import {
 } from "@/lib/api/users";
 import { getSessionServer } from "@/lib/auth/session";
 import { buildImageUrl } from "@/lib/image";
-import { sanitizeHtml } from "@/lib/sanitize";
 import { followUserAction, unfollowUserAction } from "./actions";
 
 type UserProfilePageProps = {
@@ -37,7 +36,6 @@ export default async function UserProfilePage({
   }
 
   const displayName = profile.name ?? profile.username;
-  const safeBio = profile.bio ? sanitizeHtml(profile.bio) : "";
   const initials = displayName.slice(0, 2).toUpperCase();
   const avatarUrl = profile.avatar_key
     ? buildImageUrl(profile.avatar_key)
@@ -92,9 +90,9 @@ export default async function UserProfilePage({
                   {profile.name}
                 </p>
               ) : null}
-              {safeBio ? (
+              {profile.bio ? (
                 <p className="ui-text-muted max-w-xl text-sm leading-relaxed">
-                  {safeBio}
+                  {profile.bio}
                 </p>
               ) : null}
               {!isOwnProfile && viewerUsername && accessToken ? (

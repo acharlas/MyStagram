@@ -7,7 +7,6 @@ import { CommentIcon } from "@/components/ui/icons";
 import { ApiError, apiServerFetch } from "@/lib/api/client";
 import { getSessionServer } from "@/lib/auth/session";
 import { buildImageUrl } from "@/lib/image";
-import { sanitizeHtml } from "@/lib/sanitize";
 import type { FeedPost } from "@/types/feed";
 
 async function getHomeFeed(accessToken?: string): Promise<FeedPost[] | null> {
@@ -31,7 +30,6 @@ async function getHomeFeed(accessToken?: string): Promise<FeedPost[] | null> {
 }
 
 function PostCard({ post }: { post: FeedPost }) {
-  const safeCaption = post.caption ? sanitizeHtml(post.caption) : "";
   const imageUrl = buildImageUrl(post.image_key);
   const displayName =
     post.author_name ?? post.author_username ?? post.author_id;
@@ -84,9 +82,9 @@ function PostCard({ post }: { post: FeedPost }) {
         </div>
       </Link>
 
-      {safeCaption ? (
+      {post.caption ? (
         <p className="ui-text-muted mt-3 text-sm leading-relaxed">
-          {safeCaption}
+          {post.caption}
         </p>
       ) : (
         <p className="ui-text-subtle mt-3 text-sm">Aucune légende</p>
