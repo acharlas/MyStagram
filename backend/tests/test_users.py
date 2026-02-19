@@ -47,6 +47,10 @@ def make_payload_for(username: str) -> dict[str, str | None]:
 async def test_get_user_profile(async_client: AsyncClient):
     payload = build_payload()
     await async_client.post("/api/v1/auth/register", json=payload)
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": payload["username"], "password": payload["password"]},
+    )
 
     response = await async_client.get(f"/api/v1/users/{payload['username']}")
     assert response.status_code == 200
@@ -54,6 +58,15 @@ async def test_get_user_profile(async_client: AsyncClient):
     assert body["username"] == payload["username"]
     assert "email" not in body
     assert body["avatar_key"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_user_profile_requires_auth(async_client: AsyncClient):
+    payload = build_payload()
+    await async_client.post("/api/v1/auth/register", json=payload)
+
+    response = await async_client.get(f"/api/v1/users/{payload['username']}")
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -264,6 +277,20 @@ async def test_update_me_rejects_too_long_name(
     )
     user = db_result.scalar_one()
     assert user.name == payload["name"]
+
+
+@pytest.mark.asyncio
+async def test_update_me_rejects_too_long_bio(async_client: AsyncClient):
+    payload = build_payload()
+    await async_client.post("/api/v1/auth/register", json=payload)
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": payload["username"], "password": payload["password"]},
+    )
+
+    response = await async_client.patch("/api/v1/me", data={"bio": "x" * 501})
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert "at most 500 characters" in response.json()["detail"]
 
 
 @pytest.mark.asyncio

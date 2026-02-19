@@ -124,7 +124,7 @@ async def test_followers_and_following_lists(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_followers_and_following_allow_public_access(async_client: AsyncClient):
+async def test_followers_and_following_require_auth(async_client: AsyncClient):
     alice = make_user_payload("alice")
     bob = make_user_payload("bob")
 
@@ -139,10 +139,10 @@ async def test_followers_and_following_allow_public_access(async_client: AsyncCl
     await async_client.post("/api/v1/auth/logout")
 
     followers_resp = await async_client.get(f"/api/v1/users/{alice['username']}/followers")
-    assert followers_resp.status_code == 200
+    assert followers_resp.status_code == 401
 
     following_resp = await async_client.get(f"/api/v1/users/{alice['username']}/following")
-    assert following_resp.status_code == 200
+    assert following_resp.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -167,7 +167,6 @@ async def test_followers_list_visible_to_non_followers(async_client: AsyncClient
         "/api/v1/auth/login",
         json={"username": eve["username"], "password": eve["password"]},
     )
-    await async_client.post("/api/v1/auth/logout")
 
     followers_resp = await async_client.get(f"/api/v1/users/{alice['username']}/followers")
     assert followers_resp.status_code == 200

@@ -68,6 +68,16 @@ async def test_register_rejects_email_like_username(async_client):
 
 
 @pytest.mark.asyncio
+async def test_register_rejects_too_long_bio(async_client):
+    payload = build_payload()
+    payload["bio"] = "x" * 501
+
+    response = await async_client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_register_conflict(async_client):
     payload = build_payload()
     await async_client.post("/api/v1/auth/register", json=payload)

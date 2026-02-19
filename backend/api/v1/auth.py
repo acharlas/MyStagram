@@ -38,6 +38,7 @@ COOKIE_SECURE = (
     and not settings.allow_insecure_http_cookies
 )
 MAX_ACTIVE_REFRESH_TOKENS = 5
+MAX_PROFILE_BIO_LENGTH = 500
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -79,7 +80,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     name: str | None = Field(default=None, max_length=80)
-    bio: str | None = None
+    bio: str | None = Field(default=None, max_length=MAX_PROFILE_BIO_LENGTH)
 
     @field_validator("username")
     @classmethod

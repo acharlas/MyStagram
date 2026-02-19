@@ -35,6 +35,7 @@ from services.post_policy import (
 )
 
 router = APIRouter(prefix="/posts", tags=["posts"])
+MAX_POST_CAPTION_LENGTH = 2200
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -116,6 +117,17 @@ async def create_post(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> PostResponse:
+    normalized_caption = None
+    if caption is not None:
+        normalized_caption = caption.strip()
+        if len(normalized_caption) > MAX_POST_CAPTION_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Caption must be at most {MAX_POST_CAPTION_LENGTH} characters",
+            )
+        if normalized_caption == "":
+            normalized_caption = None
+
     try:
         data = await read_upload_file(image, settings.upload_max_bytes)
         processed_bytes, content_type = await asyncio.to_thread(process_image_bytes, data)
@@ -147,7 +159,7 @@ async def create_post(
     post = Post(
         author_id=current_user.id,
         image_key=object_key,
-        caption=caption,
+        caption=normalized_caption,
     )
     session.add(post)
     try:

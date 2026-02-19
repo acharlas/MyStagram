@@ -106,6 +106,49 @@ async def test_create_and_get_post(
 
 
 @pytest.mark.asyncio
+async def test_create_post_rejects_too_long_caption(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    payload = make_user_payload("author")
+    await async_client.post("/api/v1/auth/register", json=payload)
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": payload["username"], "password": payload["password"]},
+    )
+
+    class DummyMinio:
+        def bucket_exists(self, bucket_name: str) -> bool:
+            return True
+
+        def make_bucket(self, bucket_name: str) -> None:
+            return None
+
+        def put_object(self, bucket_name, object_name, data, length, content_type=None):
+            return None
+
+    dummy_client = DummyMinio()
+    monkeypatch.setattr(storage, "get_minio_client", lambda: dummy_client)
+    monkeypatch.setattr(storage, "ensure_bucket", lambda client=None: None)
+    monkeypatch.setattr(posts_api, "get_minio_client", lambda: dummy_client)
+    monkeypatch.setattr(posts_api, "ensure_bucket", lambda client=None: None)
+    # Oversized captions should short-circuit before any image bytes are processed.
+    async def fail_if_read_called(*args, **kwargs):
+        raise AssertionError("read_upload_file must not be called when caption is too long")
+
+    monkeypatch.setattr(posts_api, "read_upload_file", fail_if_read_called)
+
+    files = {"image": ("photo.png", make_image_bytes(), "image/png")}
+    response = await async_client.post(
+        "/api/v1/posts",
+        data={"caption": "x" * 2201},
+        files=files,
+    )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert "at most 2200 characters" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_create_post_cleans_up_upload_when_commit_fails(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,

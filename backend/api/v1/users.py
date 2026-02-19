@@ -33,6 +33,7 @@ from services import (
 
 router = APIRouter(tags=["users"])
 MAX_PROFILE_NAME_LENGTH = 80
+MAX_PROFILE_BIO_LENGTH = 500
 logger = logging.getLogger(__name__)
 
 
@@ -138,6 +139,7 @@ async def search_users(
 async def get_user_profile(
     username: str,
     session: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
 ) -> UserProfilePublic:
     """Fetch a user's public profile."""
     result = await session.execute(select(User).where(_eq(User.username, username)))
@@ -177,6 +179,11 @@ async def update_me(
         updated = True
     if bio is not None:
         normalized_bio = bio.strip()
+        if len(normalized_bio) > MAX_PROFILE_BIO_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Bio must be at most {MAX_PROFILE_BIO_LENGTH} characters",
+            )
         current_user.bio = normalized_bio or None
         updated = True
 
@@ -424,6 +431,7 @@ async def list_followers(
     limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
     offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
 ) -> list[UserProfilePublic]:
     result = await session.execute(select(User).where(_eq(User.username, username)))
     target_user = result.scalar_one_or_none()
@@ -465,6 +473,7 @@ async def list_following(
     limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
     offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
 ) -> list[UserProfilePublic]:
     result = await session.execute(select(User).where(_eq(User.username, username)))
     target_user = result.scalar_one_or_none()
