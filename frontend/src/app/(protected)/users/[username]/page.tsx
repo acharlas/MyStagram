@@ -1,4 +1,3 @@
-import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -6,10 +5,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SettingsIcon } from "@/components/ui/icons";
 import { ConnectionsPanel } from "@/components/user/ConnectionsPanel";
 import { FollowButton } from "@/components/user/FollowButton";
+import { UserPostsGrid } from "@/components/user/UserPostsGrid";
 import { ApiError } from "@/lib/api/client";
 import {
   fetchUserFollowStatus,
-  fetchUserPosts,
+  fetchUserPostsPage,
   fetchUserProfile,
 } from "@/lib/api/users";
 import { getSessionServer } from "@/lib/auth/session";
@@ -20,14 +20,25 @@ type UserProfilePageProps = {
   params: Promise<{ username: string }>;
 };
 
-export default async function UserProfilePage({ params }: UserProfilePageProps) {
+const USER_POSTS_PAGE_SIZE = 18;
+
+export default async function UserProfilePage({
+  params,
+}: UserProfilePageProps) {
   const { username } = await params;
   const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
   const viewerUsername = session?.user?.username ?? null;
 
   const profilePromise = fetchUserProfile(username, accessToken);
-  const postsPromise = fetchUserPosts(username, accessToken);
+  const postsPagePromise = fetchUserPostsPage(
+    username,
+    {
+      limit: USER_POSTS_PAGE_SIZE,
+      offset: 0,
+    },
+    accessToken,
+  );
   const profile = await profilePromise;
 
   if (!profile) {
@@ -47,9 +58,15 @@ export default async function UserProfilePage({ params }: UserProfilePageProps) 
       ? fetchUserFollowStatus(username, accessToken)
       : Promise.resolve(false);
 
-  let posts = [] as Awaited<ReturnType<typeof fetchUserPosts>>;
+  let postsPage: Awaited<ReturnType<typeof fetchUserPostsPage>> = {
+    data: [],
+    nextOffset: null,
+  };
   try {
-    [posts, isFollowing] = await Promise.all([postsPromise, followStatusPromise]);
+    [postsPage, isFollowing] = await Promise.all([
+      postsPagePromise,
+      followStatusPromise,
+    ]);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
       notFound();
@@ -117,35 +134,12 @@ export default async function UserProfilePage({ params }: UserProfilePageProps) 
         </div>
       </header>
 
-      <section
-        aria-label="Publications de l'utilisateur"
-        className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4"
-      >
-        {posts.length === 0 ? (
-          <p className="ui-surface-card ui-text-subtle col-span-full rounded-2xl border ui-border p-5 text-center text-sm sm:text-left">
-            Aucune publication pour le moment.
-          </p>
-        ) : (
-          posts.map((post) => {
-            const imageUrl = buildImageUrl(post.image_key);
-            return (
-              <Link
-                key={post.id}
-                href={`/posts/${post.id}`}
-                className="ui-focus-ring ui-surface-input group relative block aspect-square overflow-hidden rounded-2xl border ui-border focus:outline-none"
-              >
-                <Image
-                  src={imageUrl}
-                  alt={`Publication ${post.id}`}
-                  fill
-                  className="object-cover transition duration-500 group-hover:scale-[1.03]"
-                  sizes="(max-width: 768px) 50vw, 30vw"
-                />
-              </Link>
-            );
-          })
-        )}
-      </section>
+      <UserPostsGrid
+        username={profile.username}
+        initialPosts={postsPage.data}
+        initialNextOffset={postsPage.nextOffset}
+        pageSize={USER_POSTS_PAGE_SIZE}
+      />
     </section>
   );
 }

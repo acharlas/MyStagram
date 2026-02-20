@@ -5,7 +5,7 @@ import { ApiError } from "@/lib/api/client";
 
 const getSessionServerMock = vi.hoisted(() => vi.fn());
 const fetchUserProfileMock = vi.hoisted(() => vi.fn());
-const fetchUserPostsMock = vi.hoisted(() => vi.fn());
+const fetchUserPostsPageMock = vi.hoisted(() => vi.fn());
 const fetchUserFollowStatusMock = vi.hoisted(() => vi.fn());
 const notFoundMock = vi.hoisted(() =>
   vi.fn(() => {
@@ -19,7 +19,7 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("@/lib/api/users", () => ({
   fetchUserProfile: fetchUserProfileMock,
-  fetchUserPosts: fetchUserPostsMock,
+  fetchUserPostsPage: fetchUserPostsPageMock,
   fetchUserFollowStatus: fetchUserFollowStatusMock,
 }));
 
@@ -34,7 +34,7 @@ import UserProfilePage from "@/app/(protected)/users/[username]/page";
 afterEach(() => {
   getSessionServerMock.mockReset();
   fetchUserProfileMock.mockReset();
-  fetchUserPostsMock.mockReset();
+  fetchUserPostsPageMock.mockReset();
   fetchUserFollowStatusMock.mockReset();
   notFoundMock.mockReset();
 });
@@ -46,7 +46,10 @@ describe("UserProfilePage error semantics", () => {
       user: { username: "viewer" },
     });
     fetchUserProfileMock.mockRejectedValueOnce(new Error("backend down"));
-    fetchUserPostsMock.mockResolvedValueOnce([]);
+    fetchUserPostsPageMock.mockResolvedValueOnce({
+      data: [],
+      nextOffset: null,
+    });
     fetchUserFollowStatusMock.mockResolvedValueOnce(false);
 
     await expect(
@@ -69,7 +72,10 @@ describe("UserProfilePage error semantics", () => {
       bio: null,
       avatar_key: null,
     });
-    fetchUserPostsMock.mockResolvedValueOnce([]);
+    fetchUserPostsPageMock.mockResolvedValueOnce({
+      data: [],
+      nextOffset: null,
+    });
     fetchUserFollowStatusMock.mockRejectedValueOnce(
       new ApiError(404, "User not found"),
     );
@@ -94,7 +100,10 @@ describe("UserProfilePage error semantics", () => {
       bio: "Bio",
       avatar_key: null,
     });
-    fetchUserPostsMock.mockResolvedValueOnce([]);
+    fetchUserPostsPageMock.mockResolvedValueOnce({
+      data: [],
+      nextOffset: null,
+    });
 
     const html = renderToStaticMarkup(
       await UserProfilePage({
@@ -120,7 +129,10 @@ describe("UserProfilePage error semantics", () => {
       bio: null,
       avatar_key: null,
     });
-    fetchUserPostsMock.mockResolvedValueOnce([]);
+    fetchUserPostsPageMock.mockResolvedValueOnce({
+      data: [],
+      nextOffset: null,
+    });
 
     const html = renderToStaticMarkup(
       await UserProfilePage({
