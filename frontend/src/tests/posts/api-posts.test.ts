@@ -24,7 +24,11 @@ import {
   fetchPostComments,
   fetchPostCommentsPage,
   fetchPostDetail,
+  fetchPostSavedStatus,
+  fetchSavedPostsPage,
   likePostRequest,
+  savePostRequest,
+  unsavePostRequest,
   unlikePostRequest,
   updatePostCaptionRequest,
 } from "../../lib/api/posts";
@@ -238,6 +242,65 @@ describe("fetchPostCommentsPage", () => {
   });
 });
 
+describe("fetchSavedPostsPage", () => {
+  it("throws when no access token is provided", async () => {
+    await expect(
+      fetchSavedPostsPage({ limit: 10, offset: 0 }),
+    ).rejects.toMatchObject({
+      status: 401,
+      message: "Not authenticated",
+    });
+    expect(apiServerFetchPageMock).not.toHaveBeenCalled();
+  });
+
+  it("fetches saved posts page with pagination", async () => {
+    apiServerFetchPageMock.mockResolvedValueOnce({
+      data: [],
+      nextOffset: 10,
+    });
+
+    const page = await fetchSavedPostsPage(
+      { limit: 10, offset: 10 },
+      "token123",
+    );
+
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/posts/saved?limit=10&offset=10",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Cookie: "access_token=token123",
+        }),
+      }),
+    );
+    expect(page.nextOffset).toBe(10);
+  });
+});
+
+describe("fetchPostSavedStatus", () => {
+  it("returns saved status from backend", async () => {
+    apiServerFetchMock.mockResolvedValueOnce({ is_saved: true });
+
+    const isSaved = await fetchPostSavedStatus("42", "token123");
+
+    expect(isSaved).toBe(true);
+    expect(apiServerFetchMock).toHaveBeenCalledWith(
+      "/api/v1/posts/42/saved",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Cookie: "access_token=token123",
+        }),
+      }),
+    );
+  });
+
+  it("throws on invalid post id", async () => {
+    await expect(fetchPostSavedStatus("abc", "token123")).rejects.toMatchObject({
+      status: 400,
+      message: "Invalid post id",
+    });
+  });
+});
+
 describe("likePostRequest", () => {
   it("sends POST to like endpoint", async () => {
     apiServerFetchMock.mockResolvedValueOnce({
@@ -301,6 +364,46 @@ describe("unlikePostRequest", () => {
       status: 500,
       name: "ApiError",
     });
+  });
+});
+
+describe("savePostRequest", () => {
+  it("sends POST to save endpoint", async () => {
+    apiServerFetchMock.mockResolvedValueOnce({
+      detail: "Saved",
+      saved: true,
+    });
+    const result = await savePostRequest("42", "token123");
+    expect(result).toBe(true);
+    expect(apiServerFetchMock).toHaveBeenCalledWith(
+      "/api/v1/posts/42/saved",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Cookie: "access_token=token123",
+        }),
+      }),
+    );
+  });
+});
+
+describe("unsavePostRequest", () => {
+  it("sends DELETE to unsave endpoint", async () => {
+    apiServerFetchMock.mockResolvedValueOnce({
+      detail: "Unsaved",
+      saved: false,
+    });
+    const result = await unsavePostRequest("42", "token123");
+    expect(result).toBe(false);
+    expect(apiServerFetchMock).toHaveBeenCalledWith(
+      "/api/v1/posts/42/saved",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({
+          Cookie: "access_token=token123",
+        }),
+      }),
+    );
   });
 });
 

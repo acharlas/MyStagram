@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getSessionServerMock = vi.hoisted(() => vi.fn());
 const likePostRequestMock = vi.hoisted(() => vi.fn());
@@ -7,6 +7,9 @@ const createPostCommentMock = vi.hoisted(() => vi.fn());
 const deletePostCommentRequestMock = vi.hoisted(() => vi.fn());
 const deletePostRequestMock = vi.hoisted(() => vi.fn());
 const updatePostCaptionRequestMock = vi.hoisted(() => vi.fn());
+const fetchPostSavedStatusMock = vi.hoisted(() => vi.fn());
+const savePostRequestMock = vi.hoisted(() => vi.fn());
+const unsavePostRequestMock = vi.hoisted(() => vi.fn());
 const ApiErrorMock = vi.hoisted(
   () =>
     class ApiError extends Error {
@@ -31,6 +34,9 @@ vi.mock("@/lib/api/posts", () => ({
   deletePostCommentRequest: deletePostCommentRequestMock,
   deletePostRequest: deletePostRequestMock,
   updatePostCaptionRequest: updatePostCaptionRequestMock,
+  fetchPostSavedStatus: fetchPostSavedStatusMock,
+  savePostRequest: savePostRequestMock,
+  unsavePostRequest: unsavePostRequestMock,
 }));
 
 vi.mock("@/lib/api/client", () => ({
@@ -45,9 +51,18 @@ import {
   DELETE as unlikePostRoute,
 } from "../../app/api/posts/[postId]/likes/route";
 import {
+  GET as getSavedStatusRoute,
+  POST as savePostRoute,
+  DELETE as unsavePostRoute,
+} from "../../app/api/posts/[postId]/saved/route";
+import {
   DELETE as deletePostRoute,
   PATCH as patchPostRoute,
 } from "../../app/api/posts/[postId]/route";
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("post route handlers", () => {
   it("propagates backend error status for like endpoint", async () => {
@@ -72,6 +87,66 @@ describe("post route handlers", () => {
     );
 
     const response = await unlikePostRoute(new Request("http://localhost"), {
+      params: { postId: "42" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.detail).toBe("Post not found");
+  });
+
+  it("returns saved status for saved endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    fetchPostSavedStatusMock.mockResolvedValueOnce(true);
+
+    const response = await getSavedStatusRoute(new Request("http://localhost"), {
+      params: { postId: "42" },
+    });
+    const payload = (await response.json()) as { is_saved?: boolean };
+
+    expect(response.status).toBe(200);
+    expect(payload.is_saved).toBe(true);
+  });
+
+  it("returns 400 for invalid post id on saved endpoints", async () => {
+    const getResponse = await getSavedStatusRoute(new Request("http://localhost"), {
+      params: { postId: "invalid-id" },
+    });
+    const postResponse = await savePostRoute(new Request("http://localhost"), {
+      params: { postId: "invalid-id" },
+    });
+    const deleteResponse = await unsavePostRoute(new Request("http://localhost"), {
+      params: { postId: "invalid-id" },
+    });
+
+    expect(getResponse.status).toBe(400);
+    expect(postResponse.status).toBe(400);
+    expect(deleteResponse.status).toBe(400);
+    expect(fetchPostSavedStatusMock).not.toHaveBeenCalled();
+    expect(savePostRequestMock).not.toHaveBeenCalled();
+    expect(unsavePostRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates backend error status for save endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    savePostRequestMock.mockRejectedValueOnce(new ApiError(404, "Post not found"));
+
+    const response = await savePostRoute(new Request("http://localhost"), {
+      params: { postId: "42" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.detail).toBe("Post not found");
+  });
+
+  it("propagates backend error status for unsave endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    unsavePostRequestMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+
+    const response = await unsavePostRoute(new Request("http://localhost"), {
       params: { postId: "42" },
     });
     const payload = (await response.json()) as { detail?: string };

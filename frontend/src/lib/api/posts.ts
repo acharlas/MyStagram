@@ -178,6 +178,15 @@ type LikeMutationResponse = {
   like_count?: number;
 };
 
+type SavedMutationResponse = {
+  detail: string;
+  saved?: boolean;
+};
+
+type SavedStatusResponse = {
+  is_saved?: boolean;
+};
+
 type DeletePostResponse = {
   detail: string;
 };
@@ -189,6 +198,138 @@ type DeleteCommentResponse = {
 type UpdatePostResponse = {
   caption: string | null;
 };
+
+export async function fetchSavedPostsPage(
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  },
+  accessToken?: string,
+): Promise<ApiPage<FeedPost[]>> {
+  if (!accessToken) {
+    throw new ApiError(401, "Not authenticated");
+  }
+
+  const path = buildPaginatedPath("/api/v1/posts/saved", pagination);
+  try {
+    return await apiServerFetchPage<FeedPost[]>(path, {
+      cache: "no-store",
+      headers: {
+        Cookie: `access_token=${accessToken}`,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    console.error("Failed to fetch saved posts page", error);
+    throw new ApiError(500, "Unable to load saved posts");
+  }
+}
+
+export async function fetchPostSavedStatus(
+  postId: string,
+  accessToken?: string,
+): Promise<boolean> {
+  if (!accessToken) {
+    throw new ApiError(401, "Not authenticated");
+  }
+  if (!isValidPostId(postId)) {
+    throw new ApiError(400, "Invalid post id");
+  }
+
+  try {
+    const payload = await apiServerFetch<SavedStatusResponse>(
+      `/api/v1/posts/${postId}/saved`,
+      {
+        cache: "no-store",
+        headers: {
+          Cookie: `access_token=${accessToken}`,
+        },
+      },
+    );
+    if (typeof payload.is_saved === "boolean") {
+      return payload.is_saved;
+    }
+    throw new ApiError(502, "Backend response is missing saved status");
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    console.error("Failed to fetch saved status", error);
+    throw new ApiError(500, "Unable to fetch saved status");
+  }
+}
+
+export async function savePostRequest(
+  postId: string,
+  accessToken?: string,
+): Promise<boolean> {
+  if (!accessToken) {
+    throw new ApiError(401, "Not authenticated");
+  }
+  if (!isValidPostId(postId)) {
+    throw new ApiError(400, "Invalid post id");
+  }
+
+  try {
+    const payload = await apiServerFetch<SavedMutationResponse>(
+      `/api/v1/posts/${postId}/saved`,
+      {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          Cookie: `access_token=${accessToken}`,
+        },
+      },
+    );
+    if (typeof payload.saved === "boolean") {
+      return payload.saved;
+    }
+    throw new ApiError(502, "Backend response is missing saved state");
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    console.error("Failed to save post", error);
+    throw new ApiError(500, "Unable to save post");
+  }
+}
+
+export async function unsavePostRequest(
+  postId: string,
+  accessToken?: string,
+): Promise<boolean> {
+  if (!accessToken) {
+    throw new ApiError(401, "Not authenticated");
+  }
+  if (!isValidPostId(postId)) {
+    throw new ApiError(400, "Invalid post id");
+  }
+
+  try {
+    const payload = await apiServerFetch<SavedMutationResponse>(
+      `/api/v1/posts/${postId}/saved`,
+      {
+        method: "DELETE",
+        cache: "no-store",
+        headers: {
+          Cookie: `access_token=${accessToken}`,
+        },
+      },
+    );
+    if (typeof payload.saved === "boolean") {
+      return payload.saved;
+    }
+    throw new ApiError(502, "Backend response is missing saved state");
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    console.error("Failed to unsave post", error);
+    throw new ApiError(500, "Unable to unsave post");
+  }
+}
 
 export async function likePostRequest(
   postId: string,
