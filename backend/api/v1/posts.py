@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
@@ -309,6 +309,56 @@ async def get_post(
         like_count=like_count,
         viewer_has_liked=viewer_has_liked,
     )
+
+
+@router.delete("/{post_id}", status_code=status.HTTP_200_OK)
+async def delete_post(
+    post_id: int,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    viewer_id = current_user.id
+    if viewer_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User record missing identifier",
+        )
+
+    post_entity = cast(Any, Post)
+    result = await session.execute(
+        select(post_entity)
+        .where(_eq(Post.id, post_id))
+        .limit(1)
+    )
+    post = result.scalar_one_or_none()
+    if post is None or post.author_id != viewer_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+
+    object_key = post.image_key
+    await session.execute(
+        delete(Like).where(_eq(Like.post_id, post_id))
+    )
+    await session.execute(
+        delete(Comment).where(_eq(Comment.post_id, post_id))
+    )
+    await session.delete(post)
+    try:
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete post",
+        ) from exc
+
+    try:
+        await asyncio.to_thread(delete_object, object_key)
+    except Exception:
+        # Best-effort cleanup to avoid leaving orphaned media on storage failures.
+        pass
+
+    return {"detail": "Deleted"}
+
 
 @router.get("/{post_id}/comments", response_model=list[CommentResponse])
 async def get_post_comments(

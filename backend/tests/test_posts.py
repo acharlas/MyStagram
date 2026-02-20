@@ -469,6 +469,100 @@ async def test_like_and_unlike_post(
 
 
 @pytest.mark.asyncio
+async def test_delete_post_allows_author_and_cascades_related_rows(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    author_payload = make_user_payload("author_delete")
+    viewer_payload = make_user_payload("viewer_delete")
+
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    viewer_response = await async_client.post("/api/v1/auth/register", json=viewer_payload)
+
+    author_id = author_response.json()["id"]
+    viewer_id = viewer_response.json()["id"]
+
+    post = Post(author_id=author_id, image_key="posts/delete-me.jpg", caption="Delete me")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+    post_id = post.id
+
+    db_session.add(Comment(post_id=post_id, author_id=viewer_id, text="cleanup"))
+    db_session.add(Like(user_id=viewer_id, post_id=post_id))
+    await db_session.commit()
+
+    deleted_keys: list[str] = []
+    monkeypatch.setattr(posts_api, "delete_object", lambda object_key: deleted_keys.append(object_key))
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": author_payload["username"], "password": author_payload["password"]},
+    )
+
+    response = await async_client.delete(f"/api/v1/posts/{post_id}")
+    assert response.status_code == 200
+    assert response.json()["detail"] == "Deleted"
+    assert deleted_keys == ["posts/delete-me.jpg"]
+
+    db_session.expire_all()
+
+    stored_post = await db_session.execute(select(Post).where(_eq(Post.id, post_id)))
+    assert stored_post.scalar_one_or_none() is None
+
+    stored_comments = await db_session.execute(
+        select(Comment).where(_eq(Comment.post_id, post_id))
+    )
+    assert stored_comments.scalars().all() == []
+
+    stored_likes = await db_session.execute(
+        select(Like).where(_eq(Like.post_id, post_id))
+    )
+    assert stored_likes.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_delete_post_returns_not_found_for_non_author(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    author_payload = make_user_payload("author_protected")
+    outsider_payload = make_user_payload("outsider_protected")
+
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    await async_client.post("/api/v1/auth/register", json=outsider_payload)
+    author_id = author_response.json()["id"]
+
+    post = Post(author_id=author_id, image_key="posts/not-yours.jpg", caption="Hands off")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+    post_id = post.id
+
+    deleted_keys: list[str] = []
+    monkeypatch.setattr(posts_api, "delete_object", lambda object_key: deleted_keys.append(object_key))
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": outsider_payload["username"], "password": outsider_payload["password"]},
+    )
+
+    response = await async_client.delete(f"/api/v1/posts/{post_id}")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Post not found"
+    assert deleted_keys == []
+
+    stored_post = await db_session.execute(select(Post).where(_eq(Post.id, post_id)))
+    assert stored_post.scalar_one_or_none() is not None
+
+
+@pytest.mark.asyncio
 async def test_like_is_idempotent_under_concurrency(
     async_client: AsyncClient,
     db_session: AsyncSession,
