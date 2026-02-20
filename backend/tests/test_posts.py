@@ -325,7 +325,16 @@ async def test_get_post_comments_are_visible_to_any_authenticated_user(
     assert response.status_code == 200
     assert response.headers.get("x-next-offset") is None
     payload = response.json()
-    assert [item["text"] for item in payload] == ["First!", "Thanks!"]
+    assert [item["text"] for item in payload] == ["Thanks!", "First!"]
+
+    first_page = await async_client.get(
+        f"/api/v1/posts/{post.id}/comments",
+        params={"limit": 1, "offset": 0},
+    )
+    assert first_page.status_code == 200
+    assert first_page.headers.get("x-next-offset") == "1"
+    first_page_payload = first_page.json()
+    assert [item["text"] for item in first_page_payload] == ["Thanks!"]
 
     paginated = await async_client.get(
         f"/api/v1/posts/{post.id}/comments",
@@ -334,7 +343,7 @@ async def test_get_post_comments_are_visible_to_any_authenticated_user(
     assert paginated.status_code == 200
     assert paginated.headers.get("x-next-offset") is None
     paginated_payload = paginated.json()
-    assert [item["text"] for item in paginated_payload] == ["Thanks!"]
+    assert [item["text"] for item in paginated_payload] == ["First!"]
 
     await async_client.post("/api/v1/auth/logout")
     author_login = await async_client.post(
