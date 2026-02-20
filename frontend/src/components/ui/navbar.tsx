@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar, AvatarImage } from "@/components/ui/avatar";
 import {
   BellIcon,
+  BookmarkIcon,
   BrandMarkIcon,
   CloseIcon,
   CreateIcon,
@@ -43,6 +44,7 @@ type NavItem = {
 
 const DESKTOP_PRIMARY_ITEMS: NavItem[] = [
   { href: "/search", label: "Recherche", Icon: SearchIcon },
+  { href: "/saved", label: "Sauvegardés", Icon: BookmarkIcon },
 ];
 
 const MOBILE_LINK_ITEMS: NavItem[] = [
@@ -521,6 +523,14 @@ export function NavBar({ username, avatarKey }: NavBarProps) {
           </Link>
           {username ? (
             <>
+              <Link
+                href="/saved"
+                onClick={() => setIsMobileProfileOpen(false)}
+                className="ui-focus-ring ui-hover-surface ui-text-strong flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition"
+              >
+                <BookmarkIcon className="h-4 w-4" />
+                <span>Sauvegardés</span>
+              </Link>
               <Link
                 href="/settings"
                 onClick={() => setIsMobileProfileOpen(false)}

@@ -6,10 +6,15 @@ import { CommentList } from "@/components/post/CommentList";
 import { DeletePostButton } from "@/components/post/DeletePostButton";
 import { EditPostCaption } from "@/components/post/EditPostCaption";
 import { LikeButton } from "@/components/post/LikeButton";
+import { SavePostButton } from "@/components/post/SavePostButton";
 import { Avatar, AvatarImage } from "@/components/ui/avatar";
 import { CommentIcon } from "@/components/ui/icons";
 import { ApiError } from "@/lib/api/client";
-import { fetchPostCommentsPage, fetchPostDetail } from "@/lib/api/posts";
+import {
+  fetchPostCommentsPage,
+  fetchPostDetail,
+  fetchPostSavedStatus,
+} from "@/lib/api/posts";
 import { getSessionServer } from "@/lib/auth/session";
 import { buildAvatarUrl, buildImageUrl } from "@/lib/image";
 
@@ -61,9 +66,14 @@ export default async function PostDetailPage({ params }: PostPageProps) {
         nextOffset: null,
       });
 
-  const [post, commentsPage] = await Promise.all([
+  const initialSavedStatusPromise = accessToken
+    ? fetchPostSavedStatus(postId, accessToken)
+    : Promise.resolve(null);
+
+  const [post, commentsPage, initialSavedStatus] = await Promise.all([
     fetchPostDetail(postId, accessToken),
     initialCommentsPagePromise,
+    initialSavedStatusPromise,
   ]);
 
   if (!post) {
@@ -154,6 +164,12 @@ export default async function PostDetailPage({ params }: PostPageProps) {
               initialLiked={post.viewer_has_liked}
               initialCount={post.like_count}
             />
+            {initialSavedStatus !== null ? (
+              <SavePostButton
+                postId={post.id}
+                initialSaved={initialSavedStatus}
+              />
+            ) : null}
             <span className="ui-surface-input ui-nav-icon inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-xs font-medium">
               <CommentIcon className="h-4 w-4" />
               Commentaires

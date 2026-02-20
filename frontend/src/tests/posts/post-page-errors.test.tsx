@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const getSessionServerMock = vi.hoisted(() => vi.fn());
 const fetchPostDetailMock = vi.hoisted(() => vi.fn());
 const fetchPostCommentsPageMock = vi.hoisted(() => vi.fn());
+const fetchPostSavedStatusMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
   getSessionServer: getSessionServerMock,
@@ -13,6 +14,7 @@ vi.mock("@/lib/auth/session", () => ({
 vi.mock("@/lib/api/posts", () => ({
   fetchPostDetail: fetchPostDetailMock,
   fetchPostCommentsPage: fetchPostCommentsPageMock,
+  fetchPostSavedStatus: fetchPostSavedStatusMock,
 }));
 
 import PostDetailPage from "@/app/(protected)/posts/[postId]/page";
@@ -35,6 +37,7 @@ describe("PostDetailPage error semantics", () => {
     expect(getSessionServerMock).not.toHaveBeenCalled();
     expect(fetchPostDetailMock).not.toHaveBeenCalled();
     expect(fetchPostCommentsPageMock).not.toHaveBeenCalled();
+    expect(fetchPostSavedStatusMock).not.toHaveBeenCalled();
   });
 
   it("propagates non-404 backend failures instead of rendering missing content", async () => {
@@ -47,6 +50,7 @@ describe("PostDetailPage error semantics", () => {
       data: [],
       nextOffset: null,
     });
+    fetchPostSavedStatusMock.mockResolvedValueOnce(false);
 
     await expect(
       PostDetailPage({

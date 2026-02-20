@@ -202,6 +202,24 @@ export function CommentIcon({ className, ...props }: IconProps) {
   );
 }
 
+export function BookmarkIcon({ className, ...props }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={iconClassName(className)}
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M7.5 4.75h9A1.75 1.75 0 0 1 18.25 6.5v13.06c0 .55-.61.87-1.06.56L12 16.54l-5.19 3.58c-.45.31-1.06-.01-1.06-.56V6.5A1.75 1.75 0 0 1 7.5 4.75Z" />
+    </svg>
+  );
+}
+
 export function BellIcon({ className, ...props }: IconProps) {
   return (
     <svg

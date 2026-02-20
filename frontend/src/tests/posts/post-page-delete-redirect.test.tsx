@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const getSessionServerMock = vi.hoisted(() => vi.fn());
 const fetchPostDetailMock = vi.hoisted(() => vi.fn());
 const fetchPostCommentsPageMock = vi.hoisted(() => vi.fn());
+const fetchPostSavedStatusMock = vi.hoisted(() => vi.fn());
 const deletePostButtonMock = vi.hoisted(() => vi.fn());
 const commentListMock = vi.hoisted(() => vi.fn());
 const editPostCaptionMock = vi.hoisted(() => vi.fn());
@@ -16,6 +17,7 @@ vi.mock("@/lib/auth/session", () => ({
 vi.mock("@/lib/api/posts", () => ({
   fetchPostDetail: fetchPostDetailMock,
   fetchPostCommentsPage: fetchPostCommentsPageMock,
+  fetchPostSavedStatus: fetchPostSavedStatusMock,
 }));
 
 vi.mock("@/components/post/CommentForm", () => ({
@@ -24,6 +26,10 @@ vi.mock("@/components/post/CommentForm", () => ({
 
 vi.mock("@/components/post/LikeButton", () => ({
   LikeButton: () => null,
+}));
+
+vi.mock("@/components/post/SavePostButton", () => ({
+  SavePostButton: () => null,
 }));
 
 vi.mock("@/components/post/DeletePostButton", () => ({
@@ -65,6 +71,7 @@ afterEach(() => {
   getSessionServerMock.mockReset();
   fetchPostDetailMock.mockReset();
   fetchPostCommentsPageMock.mockReset();
+  fetchPostSavedStatusMock.mockReset();
   deletePostButtonMock.mockReset();
   commentListMock.mockReset();
   editPostCaptionMock.mockReset();
@@ -91,6 +98,7 @@ describe("PostDetailPage delete redirect semantics", () => {
       data: [],
       nextOffset: null,
     });
+    fetchPostSavedStatusMock.mockResolvedValueOnce(true);
 
     const html = renderToStaticMarkup(
       await PostDetailPage({
@@ -132,6 +140,7 @@ describe("PostDetailPage delete redirect semantics", () => {
       data: [],
       nextOffset: null,
     });
+    fetchPostSavedStatusMock.mockResolvedValueOnce(true);
 
     renderToStaticMarkup(
       await PostDetailPage({
@@ -173,6 +182,7 @@ describe("PostDetailPage delete redirect semantics", () => {
       ],
       nextOffset: 20,
     });
+    fetchPostSavedStatusMock.mockResolvedValueOnce(true);
 
     renderToStaticMarkup(
       await PostDetailPage({
