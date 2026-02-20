@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
@@ -526,6 +526,53 @@ async def create_comment(
         author_name=author_name,
         author_username=author_username,
     )
+
+
+@router.delete("/{post_id}/comments/{comment_id}", status_code=status.HTTP_200_OK)
+async def delete_comment(
+    post_id: int,
+    comment_id: int,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    viewer_id = current_user.id
+    if viewer_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User record missing identifier",
+        )
+
+    comment_entity = cast(Any, Comment)
+    post_author_column = cast(ColumnElement[str], Post.author_id)
+    comment_author_column = cast(ColumnElement[str], Comment.author_id)
+    result = await session.execute(
+        select(comment_entity)
+        .join(Post, _eq(Post.id, Comment.post_id))
+        .where(
+            _eq(Comment.post_id, post_id),
+            _eq(Comment.id, comment_id),
+            or_(
+                _eq(comment_author_column, viewer_id),
+                _eq(post_author_column, viewer_id),
+            ),
+        )
+        .limit(1)
+    )
+    comment = result.scalar_one_or_none()
+    if comment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+
+    await session.delete(comment)
+    try:
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete comment",
+        ) from exc
+
+    return {"detail": "Deleted"}
 
 
 @router.post("/{post_id}/likes", status_code=status.HTTP_200_OK)

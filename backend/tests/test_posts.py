@@ -413,6 +413,149 @@ async def test_create_comment_endpoint(
 
 
 @pytest.mark.asyncio
+async def test_delete_comment_allows_comment_author(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    author_payload = make_user_payload("auth_cdel")
+    commenter_payload = make_user_payload("comm_cdel")
+
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    commenter_response = await async_client.post(
+        "/api/v1/auth/register",
+        json=commenter_payload,
+    )
+
+    author_id = author_response.json()["id"]
+    commenter_id = commenter_response.json()["id"]
+
+    post = Post(author_id=author_id, image_key="posts/comment-delete-author.jpg", caption="Delete comment")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+    post_id = post.id
+
+    comment = Comment(post_id=post_id, author_id=commenter_id, text="Remove me")
+    db_session.add(comment)
+    await db_session.commit()
+    await db_session.refresh(comment)
+    if comment.id is None:  # pragma: no cover - defensive
+        pytest.fail("Comment id should not be null after refresh")
+    comment_id = comment.id
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": commenter_payload["username"], "password": commenter_payload["password"]},
+    )
+
+    response = await async_client.delete(f"/api/v1/posts/{post_id}/comments/{comment_id}")
+    assert response.status_code == 200
+    assert response.json()["detail"] == "Deleted"
+
+    db_session.expire_all()
+    stored_comment = await db_session.execute(select(Comment).where(_eq(Comment.id, comment_id)))
+    assert stored_comment.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_allows_post_author(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    author_payload = make_user_payload("auth_cown")
+    commenter_payload = make_user_payload("comm_cown")
+
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    commenter_response = await async_client.post(
+        "/api/v1/auth/register",
+        json=commenter_payload,
+    )
+
+    author_id = author_response.json()["id"]
+    commenter_id = commenter_response.json()["id"]
+
+    post = Post(author_id=author_id, image_key="posts/comment-delete-owner.jpg", caption="Owner delete")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+    post_id = post.id
+
+    comment = Comment(post_id=post_id, author_id=commenter_id, text="Owner can remove")
+    db_session.add(comment)
+    await db_session.commit()
+    await db_session.refresh(comment)
+    if comment.id is None:  # pragma: no cover - defensive
+        pytest.fail("Comment id should not be null after refresh")
+    comment_id = comment.id
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": author_payload["username"], "password": author_payload["password"]},
+    )
+
+    response = await async_client.delete(f"/api/v1/posts/{post_id}/comments/{comment_id}")
+    assert response.status_code == 200
+    assert response.json()["detail"] == "Deleted"
+
+    db_session.expire_all()
+    stored_comment = await db_session.execute(select(Comment).where(_eq(Comment.id, comment_id)))
+    assert stored_comment.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_delete_comment_returns_not_found_for_unrelated_user(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    author_payload = make_user_payload("auth_cguard")
+    commenter_payload = make_user_payload("comm_cguard")
+    outsider_payload = make_user_payload("outs_cguard")
+
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    commenter_response = await async_client.post(
+        "/api/v1/auth/register",
+        json=commenter_payload,
+    )
+    await async_client.post("/api/v1/auth/register", json=outsider_payload)
+
+    author_id = author_response.json()["id"]
+    commenter_id = commenter_response.json()["id"]
+
+    post = Post(author_id=author_id, image_key="posts/comment-delete-guard.jpg", caption="Guard")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+    post_id = post.id
+
+    comment = Comment(post_id=post_id, author_id=commenter_id, text="Hands off")
+    db_session.add(comment)
+    await db_session.commit()
+    await db_session.refresh(comment)
+    if comment.id is None:  # pragma: no cover - defensive
+        pytest.fail("Comment id should not be null after refresh")
+    comment_id = comment.id
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": outsider_payload["username"], "password": outsider_payload["password"]},
+    )
+
+    response = await async_client.delete(f"/api/v1/posts/{post_id}/comments/{comment_id}")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Comment not found"
+
+    db_session.expire_all()
+    stored_comment = await db_session.execute(select(Comment).where(_eq(Comment.id, comment_id)))
+    assert stored_comment.scalar_one_or_none() is not None
+
+
+@pytest.mark.asyncio
 async def test_like_and_unlike_post(
     async_client: AsyncClient,
     db_session: AsyncSession,
