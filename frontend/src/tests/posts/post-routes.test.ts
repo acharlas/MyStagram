@@ -4,6 +4,7 @@ const getSessionServerMock = vi.hoisted(() => vi.fn());
 const likePostRequestMock = vi.hoisted(() => vi.fn());
 const unlikePostRequestMock = vi.hoisted(() => vi.fn());
 const createPostCommentMock = vi.hoisted(() => vi.fn());
+const deletePostRequestMock = vi.hoisted(() => vi.fn());
 const ApiErrorMock = vi.hoisted(
   () =>
     class ApiError extends Error {
@@ -25,6 +26,7 @@ vi.mock("@/lib/api/posts", () => ({
   likePostRequest: likePostRequestMock,
   unlikePostRequest: unlikePostRequestMock,
   createPostComment: createPostCommentMock,
+  deletePostRequest: deletePostRequestMock,
 }));
 
 vi.mock("@/lib/api/client", () => ({
@@ -37,6 +39,7 @@ import {
   POST as likePostRoute,
   DELETE as unlikePostRoute,
 } from "../../app/api/posts/[postId]/likes/route";
+import { DELETE as deletePostRoute } from "../../app/api/posts/[postId]/route";
 
 describe("post route handlers", () => {
   it("propagates backend error status for like endpoint", async () => {
@@ -83,6 +86,34 @@ describe("post route handlers", () => {
       }),
       { params: { postId: "42" } },
     );
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.detail).toBe("Post not found");
+  });
+
+  it("returns 400 for invalid post id on delete endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+
+    const response = await deletePostRoute(new Request("http://localhost"), {
+      params: { postId: "invalid-id" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.detail).toBe("Invalid post id");
+    expect(deletePostRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates backend error status for delete endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    deletePostRequestMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+
+    const response = await deletePostRoute(new Request("http://localhost"), {
+      params: { postId: "42" },
+    });
     const payload = (await response.json()) as { detail?: string };
 
     expect(response.status).toBe(404);

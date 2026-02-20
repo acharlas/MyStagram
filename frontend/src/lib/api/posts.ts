@@ -81,6 +81,10 @@ type LikeMutationResponse = {
   like_count?: number;
 };
 
+type DeletePostResponse = {
+  detail: string;
+};
+
 export async function likePostRequest(
   postId: string,
   accessToken?: string,
@@ -181,5 +185,33 @@ export async function createPostComment(
     }
     console.error("Failed to create comment", error);
     throw new ApiError(500, "Unable to create comment");
+  }
+}
+
+export async function deletePostRequest(
+  postId: string,
+  accessToken?: string,
+): Promise<void> {
+  if (!accessToken) {
+    throw new ApiError(401, "Not authenticated");
+  }
+  if (!isValidPostId(postId)) {
+    throw new ApiError(400, "Invalid post id");
+  }
+
+  try {
+    await apiServerFetch<DeletePostResponse>(`/api/v1/posts/${postId}`, {
+      method: "DELETE",
+      cache: "no-store",
+      headers: {
+        Cookie: `access_token=${accessToken}`,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    console.error("Failed to delete post", error);
+    throw new ApiError(500, "Unable to delete post");
   }
 }
