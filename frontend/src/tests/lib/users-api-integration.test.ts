@@ -6,6 +6,7 @@ import {
   fetchUserConnections,
   fetchUserFollowers,
   fetchUserFollowStatus,
+  fetchUserPostsPage,
 } from "../../lib/api/users";
 
 const originalFetch = globalThis.fetch;
@@ -129,6 +130,42 @@ describe("user API integration behavior", () => {
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://backend:8000/api/v1/users/demo/following?limit=20&offset=1",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Cookie: "access_token=token-1",
+          Authorization: "Bearer token-1",
+        }),
+      }),
+    );
+  });
+
+  it("fetchUserPostsPage parses x-next-offset header", async () => {
+    const posts = [
+      { id: 7, image_key: "posts/7.jpg", caption: null, like_count: 0 },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(posts), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-next-offset": "18",
+        },
+      }),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    const result = await fetchUserPostsPage(
+      "demo",
+      { limit: 18, offset: 0 },
+      "token-1",
+    );
+
+    expect(result).toEqual({
+      data: posts,
+      nextOffset: 18,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://backend:8000/api/v1/users/demo/posts?limit=18",
       expect.objectContaining({
         headers: expect.objectContaining({
           Cookie: "access_token=token-1",

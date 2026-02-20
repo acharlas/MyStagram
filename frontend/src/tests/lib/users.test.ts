@@ -6,6 +6,7 @@ import {
   fetchUserFollowers,
   fetchUserFollowStatus,
   fetchUserPosts,
+  fetchUserPostsPage,
   fetchUserProfile,
   followUserRequest,
   unfollowUserRequest,
@@ -114,6 +115,46 @@ describe("fetchUserPosts", () => {
     apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
 
     await expect(fetchUserPosts("demo")).rejects.toThrow("nope");
+  });
+});
+
+describe("fetchUserPostsPage", () => {
+  it("calls posts endpoint with pagination and returns api page", async () => {
+    const page = {
+      data: [{ id: 1, image_key: "posts/1.jpg", caption: "Hi", like_count: 2 }],
+      nextOffset: 18,
+    };
+    apiServerFetchPageMock.mockResolvedValueOnce(page);
+
+    const result = await fetchUserPostsPage(
+      "demo",
+      { limit: 18, offset: 18 },
+      "access-123",
+    );
+
+    expect(result).toEqual(page);
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/users/demo/posts?limit=18&offset=18",
+      expect.objectContaining({
+        headers: {
+          Cookie: "access_token=access-123",
+        },
+      }),
+    );
+  });
+
+  it("omits offset when it is zero", async () => {
+    const page = { data: [], nextOffset: null };
+    apiServerFetchPageMock.mockResolvedValueOnce(page);
+
+    await fetchUserPostsPage("demo", { limit: 18, offset: 0 });
+
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/users/demo/posts?limit=18",
+      expect.objectContaining({
+        headers: undefined,
+      }),
+    );
   });
 });
 

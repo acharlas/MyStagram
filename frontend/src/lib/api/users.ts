@@ -79,6 +79,29 @@ function buildConnectionPath(
   return query.length > 0 ? `${basePath}?${query}` : basePath;
 }
 
+function buildPostsPath(
+  username: string,
+  {
+    limit,
+    offset,
+  }: {
+    limit?: number;
+    offset?: number;
+  } = {},
+): string {
+  const params = new URLSearchParams();
+  if (typeof limit === "number") {
+    params.set("limit", String(limit));
+  }
+  if (typeof offset === "number" && offset > 0) {
+    params.set("offset", String(offset));
+  }
+
+  const basePath = `${buildProfilePath(username)}/posts`;
+  const query = params.toString();
+  return query.length > 0 ? `${basePath}?${query}` : basePath;
+}
+
 export async function fetchUserProfile(
   username: string,
   accessToken?: string,
@@ -114,6 +137,23 @@ export async function fetchUserPosts(
     }
     throw error;
   }
+}
+
+export function fetchUserPostsPage(
+  username: string,
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  },
+  accessToken?: string,
+): Promise<ApiPage<UserGridPost[]>> {
+  return apiServerFetchPage<UserGridPost[]>(
+    buildPostsPath(username, pagination),
+    {
+      cache: "no-store",
+      headers: buildHeaders(accessToken),
+    },
+  );
 }
 
 export async function fetchUserFollowers(
