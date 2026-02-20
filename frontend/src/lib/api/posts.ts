@@ -27,6 +27,10 @@ function isValidPostId(postId: string): boolean {
   return /^\d+$/.test(postId);
 }
 
+function isValidCommentId(commentId: string): boolean {
+  return /^\d+$/.test(commentId);
+}
+
 export async function fetchPostDetail(
   postId: string,
   accessToken?: string,
@@ -82,6 +86,10 @@ type LikeMutationResponse = {
 };
 
 type DeletePostResponse = {
+  detail: string;
+};
+
+type DeleteCommentResponse = {
   detail: string;
 };
 
@@ -189,6 +197,41 @@ export async function createPostComment(
     }
     console.error("Failed to create comment", error);
     throw new ApiError(500, "Unable to create comment");
+  }
+}
+
+export async function deletePostCommentRequest(
+  postId: string,
+  commentId: string,
+  accessToken?: string,
+): Promise<void> {
+  if (!accessToken) {
+    throw new ApiError(401, "Not authenticated");
+  }
+  if (!isValidPostId(postId)) {
+    throw new ApiError(400, "Invalid post id");
+  }
+  if (!isValidCommentId(commentId)) {
+    throw new ApiError(400, "Invalid comment id");
+  }
+
+  try {
+    await apiServerFetch<DeleteCommentResponse>(
+      `/api/v1/posts/${postId}/comments/${commentId}`,
+      {
+        method: "DELETE",
+        cache: "no-store",
+        headers: {
+          Cookie: `access_token=${accessToken}`,
+        },
+      },
+    );
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    console.error("Failed to delete comment", error);
+    throw new ApiError(500, "Unable to delete comment");
   }
 }
 

@@ -4,6 +4,7 @@ const getSessionServerMock = vi.hoisted(() => vi.fn());
 const likePostRequestMock = vi.hoisted(() => vi.fn());
 const unlikePostRequestMock = vi.hoisted(() => vi.fn());
 const createPostCommentMock = vi.hoisted(() => vi.fn());
+const deletePostCommentRequestMock = vi.hoisted(() => vi.fn());
 const deletePostRequestMock = vi.hoisted(() => vi.fn());
 const updatePostCaptionRequestMock = vi.hoisted(() => vi.fn());
 const ApiErrorMock = vi.hoisted(
@@ -27,6 +28,7 @@ vi.mock("@/lib/api/posts", () => ({
   likePostRequest: likePostRequestMock,
   unlikePostRequest: unlikePostRequestMock,
   createPostComment: createPostCommentMock,
+  deletePostCommentRequest: deletePostCommentRequestMock,
   deletePostRequest: deletePostRequestMock,
   updatePostCaptionRequest: updatePostCaptionRequestMock,
 }));
@@ -36,6 +38,7 @@ vi.mock("@/lib/api/client", () => ({
 }));
 
 import { ApiError } from "@/lib/api/client";
+import { DELETE as commentDeleteRoute } from "../../app/api/posts/[postId]/comments/[commentId]/route";
 import { POST as commentPostRoute } from "../../app/api/posts/[postId]/comments/route";
 import {
   POST as likePostRoute,
@@ -95,6 +98,39 @@ describe("post route handlers", () => {
 
     expect(response.status).toBe(404);
     expect(payload.detail).toBe("Post not found");
+  });
+
+  it("returns 400 for invalid comment id on comment delete endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+
+    const response = await commentDeleteRoute(new Request("http://localhost"), {
+      params: { postId: "42", commentId: "invalid-id" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.detail).toBe("Invalid comment id");
+    expect(deletePostCommentRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates backend error status for comment delete endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    deletePostCommentRequestMock.mockRejectedValueOnce(
+      new ApiError(404, "Comment not found"),
+    );
+
+    const response = await commentDeleteRoute(new Request("http://localhost"), {
+      params: { postId: "42", commentId: "7" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.detail).toBe("Comment not found");
+    expect(deletePostCommentRequestMock).toHaveBeenCalledWith(
+      "42",
+      "7",
+      "access-token",
+    );
   });
 
   it("returns 400 for invalid post id on delete endpoint", async () => {

@@ -13,6 +13,7 @@ vi.mock("../../lib/api/client", async () => {
 import { ApiError, apiServerFetch } from "../../lib/api/client";
 import {
   createPostComment,
+  deletePostCommentRequest,
   deletePostRequest,
   fetchPostComments,
   fetchPostDetail,
@@ -228,6 +229,48 @@ describe("createPostComment", () => {
     ).rejects.toMatchObject({
       status: 500,
       name: "ApiError",
+    });
+  });
+});
+
+describe("deletePostCommentRequest", () => {
+  it("sends DELETE to comment endpoint", async () => {
+    apiServerFetchMock.mockResolvedValueOnce({ detail: "Deleted" });
+
+    await expect(
+      deletePostCommentRequest("42", "7", "token123"),
+    ).resolves.toBeUndefined();
+
+    expect(apiServerFetchMock).toHaveBeenCalledWith(
+      "/api/v1/posts/42/comments/7",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({
+          Cookie: "access_token=token123",
+        }),
+      }),
+    );
+  });
+
+  it("throws on invalid comment id", async () => {
+    await expect(
+      deletePostCommentRequest("42", "abc", "token123"),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "Invalid comment id",
+    });
+    expect(apiServerFetchMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves backend error status", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "Comment not found"),
+    );
+    await expect(
+      deletePostCommentRequest("42", "7", "token123"),
+    ).rejects.toMatchObject({
+      status: 404,
+      message: "Comment not found",
     });
   });
 });
