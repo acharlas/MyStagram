@@ -162,6 +162,28 @@ export function CloseIcon({ className, ...props }: IconProps) {
   );
 }
 
+export function TrashIcon({ className, ...props }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={iconClassName(className)}
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M4 7h16" />
+      <path d="M9 7V5.8c0-.44.36-.8.8-.8h4.4c.44 0 .8.36.8.8V7" />
+      <path d="M7.5 7 8.3 19c.03.55.49 1 1.05 1h5.3c.56 0 1.02-.45 1.05-1L16.5 7" />
+      <path d="M10 10v6" />
+      <path d="M14 10v6" />
+    </svg>
+  );
+}
+
 export function CommentIcon({ className, ...props }: IconProps) {
   return (
     <svg

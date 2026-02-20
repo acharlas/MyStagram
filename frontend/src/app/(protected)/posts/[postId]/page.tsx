@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { CommentForm } from "@/components/post/CommentForm";
+import { DeleteCommentButton } from "@/components/post/DeleteCommentButton";
 import { DeletePostButton } from "@/components/post/DeletePostButton";
 import { EditPostCaption } from "@/components/post/EditPostCaption";
 import { LikeButton } from "@/components/post/LikeButton";
@@ -115,25 +116,39 @@ export default async function PostDetailPage({ params }: PostPageProps) {
                   comment.author_id;
                 const commentAuthorUsername =
                   comment.author_username ?? undefined;
+                const canDeleteComment =
+                  viewerUserId !== null &&
+                  (viewerUserId === comment.author_id ||
+                    viewerUserId === post.author_id);
                 return (
                   <li
                     key={comment.id}
                     className="ui-surface-input ui-text-muted rounded-xl border ui-border px-3 py-2 text-sm"
                   >
-                    {commentAuthorUsername ? (
-                      <Link
-                        href={`/users/${encodeURIComponent(commentAuthorUsername)}`}
-                        className="ui-focus-ring ui-text-strong font-semibold transition hover:text-[color:var(--ui-nav-icon-active)] focus:outline-none"
-                      >
-                        {commentAuthorLabel}
-                      </Link>
-                    ) : (
-                      <span className="ui-text-strong font-semibold">
-                        {commentAuthorLabel}
-                      </span>
-                    )}
-                    <span className="ui-text-muted">: </span>
-                    {comment.text}
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="min-w-0 flex-1 leading-relaxed break-words">
+                        {commentAuthorUsername ? (
+                          <Link
+                            href={`/users/${encodeURIComponent(commentAuthorUsername)}`}
+                            className="ui-focus-ring ui-text-strong font-semibold transition hover:text-[color:var(--ui-nav-icon-active)] focus:outline-none"
+                          >
+                            {commentAuthorLabel}
+                          </Link>
+                        ) : (
+                          <span className="ui-text-strong font-semibold">
+                            {commentAuthorLabel}
+                          </span>
+                        )}
+                        <span className="ui-text-muted">: </span>
+                        {comment.text}
+                      </p>
+                      {canDeleteComment ? (
+                        <DeleteCommentButton
+                          postId={post.id}
+                          commentId={comment.id}
+                        />
+                      ) : null}
+                    </div>
                   </li>
                 );
               })}
