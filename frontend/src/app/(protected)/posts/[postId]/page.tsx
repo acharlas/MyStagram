@@ -2,36 +2,72 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { CommentForm } from "@/components/post/CommentForm";
-import { DeleteCommentButton } from "@/components/post/DeleteCommentButton";
+import { CommentList } from "@/components/post/CommentList";
 import { DeletePostButton } from "@/components/post/DeletePostButton";
 import { EditPostCaption } from "@/components/post/EditPostCaption";
 import { LikeButton } from "@/components/post/LikeButton";
 import { Avatar, AvatarImage } from "@/components/ui/avatar";
 import { CommentIcon } from "@/components/ui/icons";
-import { fetchPostComments, fetchPostDetail } from "@/lib/api/posts";
+import { ApiError } from "@/lib/api/client";
+import { fetchPostCommentsPage, fetchPostDetail } from "@/lib/api/posts";
 import { getSessionServer } from "@/lib/auth/session";
 import { buildAvatarUrl, buildImageUrl } from "@/lib/image";
 
 type PostPageProps = { params: Promise<{ postId: string }> };
+const COMMENTS_PAGE_SIZE = 20;
+
+function isValidPostId(postId: string): boolean {
+  return /^\d+$/.test(postId);
+}
+
+function renderMissingPost() {
+  return (
+    <section className="ui-text-subtle mx-auto flex w-full max-w-xl flex-col gap-4 py-8 text-center text-sm">
+      <p>Ce contenu est introuvable.</p>
+    </section>
+  );
+}
 
 export default async function PostDetailPage({ params }: PostPageProps) {
   const { postId } = await params;
+  if (!isValidPostId(postId)) {
+    return renderMissingPost();
+  }
+
   const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
   const viewerUserId = session?.user?.id ?? null;
   const viewerUsername = session?.user?.username ?? null;
 
-  const [post, comments] = await Promise.all([
+  const initialCommentsPagePromise = accessToken
+    ? fetchPostCommentsPage(
+        postId,
+        {
+          limit: COMMENTS_PAGE_SIZE,
+          offset: 0,
+        },
+        accessToken,
+      ).catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 404) {
+          return {
+            data: [],
+            nextOffset: null,
+          };
+        }
+        throw error;
+      })
+    : Promise.resolve({
+        data: [],
+        nextOffset: null,
+      });
+
+  const [post, commentsPage] = await Promise.all([
     fetchPostDetail(postId, accessToken),
-    fetchPostComments(postId, accessToken),
+    initialCommentsPagePromise,
   ]);
 
   if (!post) {
-    return (
-      <section className="ui-text-subtle mx-auto flex w-full max-w-xl flex-col gap-4 py-8 text-center text-sm">
-        <p>Ce contenu est introuvable.</p>
-      </section>
-    );
+    return renderMissingPost();
   }
 
   const authorLabel =
@@ -102,59 +138,14 @@ export default async function PostDetailPage({ params }: PostPageProps) {
           ) : null}
         </header>
 
-        <div className="flex-1 overflow-y-auto pr-1">
-          {comments.length === 0 ? (
-            <p className="ui-text-subtle text-sm">
-              Pas encore de commentaires.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {comments.map((comment) => {
-                const commentAuthorLabel =
-                  comment.author_name ??
-                  comment.author_username ??
-                  comment.author_id;
-                const commentAuthorUsername =
-                  comment.author_username ?? undefined;
-                const canDeleteComment =
-                  viewerUserId !== null &&
-                  (viewerUserId === comment.author_id ||
-                    viewerUserId === post.author_id);
-                return (
-                  <li
-                    key={comment.id}
-                    className="ui-surface-input ui-text-muted rounded-xl border ui-border px-3 py-2 text-sm"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="min-w-0 flex-1 leading-relaxed break-words">
-                        {commentAuthorUsername ? (
-                          <Link
-                            href={`/users/${encodeURIComponent(commentAuthorUsername)}`}
-                            className="ui-focus-ring ui-text-strong font-semibold transition hover:text-[color:var(--ui-nav-icon-active)] focus:outline-none"
-                          >
-                            {commentAuthorLabel}
-                          </Link>
-                        ) : (
-                          <span className="ui-text-strong font-semibold">
-                            {commentAuthorLabel}
-                          </span>
-                        )}
-                        <span className="ui-text-muted">: </span>
-                        {comment.text}
-                      </p>
-                      {canDeleteComment ? (
-                        <DeleteCommentButton
-                          postId={post.id}
-                          commentId={comment.id}
-                        />
-                      ) : null}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
+        <CommentList
+          postId={post.id}
+          postAuthorId={post.author_id}
+          viewerUserId={viewerUserId}
+          initialComments={commentsPage.data}
+          initialNextOffset={commentsPage.nextOffset}
+          pageSize={COMMENTS_PAGE_SIZE}
+        />
 
         <footer className="mt-4 border-t ui-border pt-4">
           <div className="ui-text-muted flex items-center gap-3">
@@ -165,7 +156,7 @@ export default async function PostDetailPage({ params }: PostPageProps) {
             />
             <span className="ui-surface-input ui-nav-icon inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-xs font-medium">
               <CommentIcon className="h-4 w-4" />
-              {comments.length}
+              Commentaires
             </span>
           </div>
           <CommentForm postId={post.id} />

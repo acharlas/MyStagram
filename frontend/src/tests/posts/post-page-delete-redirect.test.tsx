@@ -4,9 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getSessionServerMock = vi.hoisted(() => vi.fn());
 const fetchPostDetailMock = vi.hoisted(() => vi.fn());
-const fetchPostCommentsMock = vi.hoisted(() => vi.fn());
+const fetchPostCommentsPageMock = vi.hoisted(() => vi.fn());
 const deletePostButtonMock = vi.hoisted(() => vi.fn());
-const deleteCommentButtonMock = vi.hoisted(() => vi.fn());
+const commentListMock = vi.hoisted(() => vi.fn());
 const editPostCaptionMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
@@ -15,7 +15,7 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("@/lib/api/posts", () => ({
   fetchPostDetail: fetchPostDetailMock,
-  fetchPostComments: fetchPostCommentsMock,
+  fetchPostCommentsPage: fetchPostCommentsPageMock,
 }));
 
 vi.mock("@/components/post/CommentForm", () => ({
@@ -33,9 +33,16 @@ vi.mock("@/components/post/DeletePostButton", () => ({
   },
 }));
 
-vi.mock("@/components/post/DeleteCommentButton", () => ({
-  DeleteCommentButton: (props: { postId: number; commentId: number }) => {
-    deleteCommentButtonMock(props);
+vi.mock("@/components/post/CommentList", () => ({
+  CommentList: (props: {
+    postId: number;
+    postAuthorId: string;
+    viewerUserId: string | null;
+    initialComments: Array<{ id: number }>;
+    initialNextOffset: number | null;
+    pageSize?: number;
+  }) => {
+    commentListMock(props);
     return null;
   },
 }));
@@ -57,9 +64,9 @@ import PostDetailPage from "@/app/(protected)/posts/[postId]/page";
 afterEach(() => {
   getSessionServerMock.mockReset();
   fetchPostDetailMock.mockReset();
-  fetchPostCommentsMock.mockReset();
+  fetchPostCommentsPageMock.mockReset();
   deletePostButtonMock.mockReset();
-  deleteCommentButtonMock.mockReset();
+  commentListMock.mockReset();
   editPostCaptionMock.mockReset();
 });
 
@@ -80,9 +87,12 @@ describe("PostDetailPage delete redirect semantics", () => {
       like_count: 0,
       viewer_has_liked: false,
     });
-    fetchPostCommentsMock.mockResolvedValueOnce([]);
+    fetchPostCommentsPageMock.mockResolvedValueOnce({
+      data: [],
+      nextOffset: null,
+    });
 
-    renderToStaticMarkup(
+    const html = renderToStaticMarkup(
       await PostDetailPage({
         params: Promise.resolve({ postId: "42" }),
       }),
@@ -98,7 +108,8 @@ describe("PostDetailPage delete redirect semantics", () => {
       postId: 42,
       initialCaption: null,
     });
-    expect(deleteCommentButtonMock).not.toHaveBeenCalled();
+    expect(commentListMock).toHaveBeenCalledTimes(1);
+    expect(html).toContain("Commentaires");
   });
 
   it("hides delete action if profile redirect cannot be determined", async () => {
@@ -117,7 +128,10 @@ describe("PostDetailPage delete redirect semantics", () => {
       like_count: 0,
       viewer_has_liked: false,
     });
-    fetchPostCommentsMock.mockResolvedValueOnce([]);
+    fetchPostCommentsPageMock.mockResolvedValueOnce({
+      data: [],
+      nextOffset: null,
+    });
 
     renderToStaticMarkup(
       await PostDetailPage({
@@ -127,10 +141,10 @@ describe("PostDetailPage delete redirect semantics", () => {
 
     expect(deletePostButtonMock).not.toHaveBeenCalled();
     expect(editPostCaptionMock).toHaveBeenCalledTimes(1);
-    expect(deleteCommentButtonMock).not.toHaveBeenCalled();
+    expect(commentListMock).toHaveBeenCalledTimes(1);
   });
 
-  it("shows comment delete action only for comments the viewer can manage", async () => {
+  it("passes comment pagination props to CommentList", async () => {
     getSessionServerMock.mockResolvedValueOnce({
       accessToken: "token-1",
       user: { id: "viewer-id", username: "viewer" },
@@ -146,24 +160,19 @@ describe("PostDetailPage delete redirect semantics", () => {
       like_count: 0,
       viewer_has_liked: false,
     });
-    fetchPostCommentsMock.mockResolvedValueOnce([
-      {
-        id: 1,
-        author_id: "viewer-id",
-        author_name: "Viewer",
-        author_username: "viewer",
-        text: "mine",
-        created_at: "2024-01-01T00:00:00Z",
-      },
-      {
-        id: 2,
-        author_id: "someone-else",
-        author_name: "Someone",
-        author_username: "someone",
-        text: "not mine",
-        created_at: "2024-01-01T00:00:01Z",
-      },
-    ]);
+    fetchPostCommentsPageMock.mockResolvedValueOnce({
+      data: [
+        {
+          id: 1,
+          author_id: "viewer-id",
+          author_name: "Viewer",
+          author_username: "viewer",
+          text: "mine",
+          created_at: "2024-01-01T00:00:00Z",
+        },
+      ],
+      nextOffset: 20,
+    });
 
     renderToStaticMarkup(
       await PostDetailPage({
@@ -171,10 +180,23 @@ describe("PostDetailPage delete redirect semantics", () => {
       }),
     );
 
-    expect(deleteCommentButtonMock).toHaveBeenCalledTimes(1);
-    expect(deleteCommentButtonMock).toHaveBeenCalledWith({
+    expect(commentListMock).toHaveBeenCalledTimes(1);
+    expect(commentListMock).toHaveBeenCalledWith({
       postId: 42,
-      commentId: 1,
+      postAuthorId: "author-id",
+      viewerUserId: "viewer-id",
+      initialComments: [
+        {
+          id: 1,
+          author_id: "viewer-id",
+          author_name: "Viewer",
+          author_username: "viewer",
+          text: "mine",
+          created_at: "2024-01-01T00:00:00Z",
+        },
+      ],
+      initialNextOffset: 20,
+      pageSize: 20,
     });
   });
 });

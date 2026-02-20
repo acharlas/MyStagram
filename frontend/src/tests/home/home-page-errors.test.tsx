@@ -2,10 +2,14 @@ import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getSessionServerMock = vi.hoisted(() => vi.fn());
-const apiServerFetchMock = vi.hoisted(() => vi.fn());
+const fetchHomeFeedPageMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
   getSessionServer: getSessionServerMock,
+}));
+
+vi.mock("@/lib/api/posts", () => ({
+  fetchHomeFeedPage: fetchHomeFeedPageMock,
 }));
 
 vi.mock("@/lib/api/client", () => ({
@@ -17,7 +21,6 @@ vi.mock("@/lib/api/client", () => ({
       this.status = status;
     }
   },
-  apiServerFetch: apiServerFetchMock,
 }));
 
 import ProtectedHomePage from "@/app/(protected)/page";
@@ -34,7 +37,7 @@ describe("ProtectedHomePage error semantics", () => {
       accessToken: "token-1",
       user: { username: "viewer" },
     });
-    apiServerFetchMock.mockRejectedValueOnce(new Error("backend down"));
+    fetchHomeFeedPageMock.mockRejectedValueOnce(new Error("backend down"));
 
     await expect(ProtectedHomePage()).rejects.toThrow("backend down");
   });
@@ -47,6 +50,6 @@ describe("ProtectedHomePage error semantics", () => {
     const page = await ProtectedHomePage();
 
     expect(page).toBeDefined();
-    expect(apiServerFetchMock).not.toHaveBeenCalled();
+    expect(fetchHomeFeedPageMock).not.toHaveBeenCalled();
   });
 });
