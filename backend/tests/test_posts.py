@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from core.config import settings
-from models import Comment, Follow, Like, Post, User
+from models import Comment, Follow, Like, Post, SavedPost, User
 from api.v1 import posts as posts_api
 from services.auth import DEFAULT_AVATAR_OBJECT_KEY
 from services import storage
@@ -273,6 +273,11 @@ async def test_get_post_is_visible_to_any_authenticated_user(
     assert hidden_comment_create.status_code == 404
     hidden_like_create = await async_client.post(f"/api/v1/posts/{post.id}/likes")
     assert hidden_like_create.status_code == 404
+    hidden_save_create = await async_client.post(f"/api/v1/posts/{post.id}/saved")
+    assert hidden_save_create.status_code == 404
+    hidden_saved_status = await async_client.get(f"/api/v1/posts/{post.id}/saved")
+    assert hidden_saved_status.status_code == 200
+    assert hidden_saved_status.json() == {"is_saved": False}
 
 
 @pytest.mark.asyncio
@@ -621,6 +626,106 @@ async def test_like_and_unlike_post(
 
 
 @pytest.mark.asyncio
+async def test_save_unsave_and_list_saved_posts(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("viewer_saved")
+    author_payload = make_user_payload("author_saved")
+
+    viewer_response = await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+
+    viewer_id = viewer_response.json()["id"]
+    author_id = author_response.json()["id"]
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{author_payload['username']}/follow")
+
+    posts: list[Post] = []
+    for suffix in range(1, 4):
+        posts.append(
+            Post(
+                author_id=author_id,
+                image_key=f"posts/saved-{suffix}.jpg",
+                caption=f"Saved {suffix}",
+            )
+        )
+    for post in posts:
+        db_session.add(post)
+    await db_session.commit()
+    for post in posts:
+        await db_session.refresh(post)
+        if post.id is None:  # pragma: no cover - defensive
+            pytest.fail("Post id should not be null after refresh")
+
+    post_id_1 = cast(int, posts[0].id)
+    post_id_2 = cast(int, posts[1].id)
+    post_id_3 = cast(int, posts[2].id)
+
+    first_save = await async_client.post(f"/api/v1/posts/{post_id_1}/saved")
+    assert first_save.status_code == 200
+    assert first_save.json() == {"detail": "Saved", "saved": True}
+
+    second_save = await async_client.post(f"/api/v1/posts/{post_id_2}/saved")
+    assert second_save.status_code == 200
+    assert second_save.json() == {"detail": "Saved", "saved": True}
+
+    duplicate_save = await async_client.post(f"/api/v1/posts/{post_id_2}/saved")
+    assert duplicate_save.status_code == 200
+    assert duplicate_save.json() == {"detail": "Saved", "saved": True}
+
+    status_saved = await async_client.get(f"/api/v1/posts/{post_id_1}/saved")
+    assert status_saved.status_code == 200
+    assert status_saved.json() == {"is_saved": True}
+
+    status_not_saved = await async_client.get(f"/api/v1/posts/{post_id_3}/saved")
+    assert status_not_saved.status_code == 200
+    assert status_not_saved.json() == {"is_saved": False}
+
+    first_page = await async_client.get("/api/v1/posts/saved", params={"limit": 1, "offset": 0})
+    assert first_page.status_code == 200
+    assert first_page.headers.get("x-next-offset") == "1"
+    first_page_payload = first_page.json()
+    assert [item["id"] for item in first_page_payload] == [post_id_2]
+
+    second_page = await async_client.get("/api/v1/posts/saved", params={"limit": 1, "offset": 1})
+    assert second_page.status_code == 200
+    assert second_page.headers.get("x-next-offset") is None
+    second_page_payload = second_page.json()
+    assert [item["id"] for item in second_page_payload] == [post_id_1]
+
+    unfollow = await async_client.delete(f"/api/v1/users/{author_payload['username']}/follow")
+    assert unfollow.status_code == 200
+
+    status_after_unfollow = await async_client.get(f"/api/v1/posts/{post_id_2}/saved")
+    assert status_after_unfollow.status_code == 200
+    assert status_after_unfollow.json() == {"is_saved": True}
+
+    unsave = await async_client.delete(f"/api/v1/posts/{post_id_2}/saved")
+    assert unsave.status_code == 200
+    assert unsave.json() == {"detail": "Unsaved", "saved": False}
+
+    duplicate_unsave = await async_client.delete(f"/api/v1/posts/{post_id_2}/saved")
+    assert duplicate_unsave.status_code == 200
+    assert duplicate_unsave.json() == {"detail": "Unsaved", "saved": False}
+
+    status_after_unsave = await async_client.get(f"/api/v1/posts/{post_id_2}/saved")
+    assert status_after_unsave.status_code == 200
+    assert status_after_unsave.json() == {"is_saved": False}
+
+    remaining_saved = await db_session.execute(
+        select(SavedPost).where(_eq(SavedPost.user_id, viewer_id))
+    )
+    saved_rows = remaining_saved.scalars().all()
+    assert len(saved_rows) == 1
+    assert saved_rows[0].post_id == post_id_1
+
+
+@pytest.mark.asyncio
 async def test_delete_post_allows_author_and_cascades_related_rows(
     async_client: AsyncClient,
     db_session: AsyncSession,
@@ -645,6 +750,7 @@ async def test_delete_post_allows_author_and_cascades_related_rows(
 
     db_session.add(Comment(post_id=post_id, author_id=viewer_id, text="cleanup"))
     db_session.add(Like(user_id=viewer_id, post_id=post_id))
+    db_session.add(SavedPost(user_id=viewer_id, post_id=post_id))
     await db_session.commit()
 
     deleted_keys: list[str] = []
@@ -674,6 +780,11 @@ async def test_delete_post_allows_author_and_cascades_related_rows(
         select(Like).where(_eq(Like.post_id, post_id))
     )
     assert stored_likes.scalars().all() == []
+
+    stored_saved = await db_session.execute(
+        select(SavedPost).where(_eq(SavedPost.post_id, post_id))
+    )
+    assert stored_saved.scalars().all() == []
 
 
 @pytest.mark.asyncio

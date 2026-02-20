@@ -18,7 +18,7 @@ from sqlalchemy.sql import ColumnElement
 from api.deps import get_current_user, get_db
 from core import settings
 from db.errors import is_unique_violation
-from models import Comment, Like, Post, User
+from models import Comment, Like, Post, SavedPost, User
 from .pagination import MAX_PAGE_SIZE, set_next_offset_header
 from .post_views import PostResponse, build_home_feed, collect_like_meta
 from services import (
@@ -59,6 +59,7 @@ def _eq(column: Any, value: Any) -> ColumnElement[bool]:
 
 def _desc(column: Any) -> Any:
     return cast(Any, column).desc()
+
 
 def _upload_post_image(object_key: str, processed_bytes: bytes, content_type: str) -> None:
     client = get_minio_client()
@@ -111,6 +112,10 @@ class CommentCreateRequest(BaseModel):
 
 class PostUpdateRequest(BaseModel):
     caption: str | None
+
+
+class SavedPostStatusResponse(BaseModel):
+    is_saved: bool
 
 
 async def _get_like_count(session: AsyncSession, post_id: int) -> int:
@@ -259,6 +264,70 @@ async def get_feed(
     )
 
 
+@router.get("/saved", response_model=list[PostResponse])
+async def list_saved_posts(
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[PostResponse]:
+    viewer_id = current_user.id
+    if viewer_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User record missing identifier",
+        )
+
+    post_entity = cast(Any, Post)
+    author_name_column = cast(ColumnElement[str | None], User.name)
+    author_username_column = cast(ColumnElement[str | None], User.username)
+    author_avatar_key_column = cast(ColumnElement[str | None], User.avatar_key)
+    saved_created_at = cast(Any, SavedPost.created_at)
+    saved_post_id = cast(Any, SavedPost.post_id)
+    query = (
+        select(
+            post_entity,
+            author_name_column,
+            author_username_column,
+            author_avatar_key_column,
+        )
+        .join(SavedPost, _eq(SavedPost.post_id, Post.id))
+        .join(User, _eq(User.id, Post.author_id))
+        .where(_eq(SavedPost.user_id, viewer_id))
+        .order_by(
+            _desc(saved_created_at),
+            _desc(saved_post_id),
+        )
+    )
+    if offset > 0:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit + 1)
+
+    result = await session.execute(query)
+    rows = result.all()
+    if limit is not None:
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]
+        set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
+    post_ids = [post.id for post, _name, _username, _avatar_key in rows if post.id is not None]
+    count_map, liked_set = await collect_like_meta(session, post_ids, viewer_id)
+    return [
+        PostResponse.from_post(
+            post,
+            author_name=author_name,
+            author_username=username,
+            author_avatar_key=avatar_key,
+            like_count=count_map.get(post.id, 0) if post.id is not None else 0,
+            viewer_has_liked=post.id in liked_set if post.id is not None else False,
+        )
+        for post, author_name, username, avatar_key in rows
+    ]
+
+
 @router.get("/{post_id}", response_model=PostResponse)
 async def get_post(
     post_id: int,
@@ -398,6 +467,9 @@ async def delete_post(
     )
     await session.execute(
         delete(Comment).where(_eq(Comment.post_id, post_id))
+    )
+    await session.execute(
+        delete(SavedPost).where(_eq(SavedPost.post_id, post_id))
     )
     await session.delete(post)
     try:
@@ -568,6 +640,101 @@ async def delete_comment(
         ) from exc
 
     return {"detail": "Deleted"}
+
+
+@router.get("/{post_id}/saved", response_model=SavedPostStatusResponse)
+async def get_saved_post_status(
+    post_id: int,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SavedPostStatusResponse:
+    viewer_id = current_user.id
+    if viewer_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User record missing identifier",
+        )
+
+    saved_post_entity = cast(Any, SavedPost)
+    user_id_column = cast(ColumnElement[str], SavedPost.user_id)
+    post_id_column = cast(ColumnElement[int], SavedPost.post_id)
+    existing_saved_post = await session.execute(
+        select(saved_post_entity).where(
+            _eq(user_id_column, viewer_id), _eq(post_id_column, post_id)
+        )
+    )
+    return SavedPostStatusResponse(
+        is_saved=existing_saved_post.scalar_one_or_none() is not None
+    )
+
+
+@router.post("/{post_id}/saved", status_code=status.HTTP_200_OK)
+async def save_post(
+    post_id: int,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    viewer_id = current_user.id
+    if viewer_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User record missing identifier",
+        )
+
+    await require_post_interaction_access(
+        session,
+        viewer_id=viewer_id,
+        post_id=post_id,
+    )
+
+    saved_post_entity = cast(Any, SavedPost)
+    user_id_column = cast(ColumnElement[str], SavedPost.user_id)
+    post_id_column = cast(ColumnElement[int], SavedPost.post_id)
+    existing_saved_post = await session.execute(
+        select(saved_post_entity).where(
+            _eq(user_id_column, viewer_id), _eq(post_id_column, post_id)
+        )
+    )
+    saved_post_obj = existing_saved_post.scalar_one_or_none()
+    if saved_post_obj is None:
+        session.add(SavedPost(user_id=viewer_id, post_id=post_id))
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            await session.rollback()
+            if not is_unique_violation(exc):
+                raise
+
+    return {"detail": "Saved", "saved": True}
+
+
+@router.delete("/{post_id}/saved", status_code=status.HTTP_200_OK)
+async def unsave_post(
+    post_id: int,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    viewer_id = current_user.id
+    if viewer_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User record missing identifier",
+        )
+
+    saved_post_entity = cast(Any, SavedPost)
+    user_id_column = cast(ColumnElement[str], SavedPost.user_id)
+    post_id_column = cast(ColumnElement[int], SavedPost.post_id)
+    existing_saved_post = await session.execute(
+        select(saved_post_entity).where(
+            _eq(user_id_column, viewer_id), _eq(post_id_column, post_id)
+        )
+    )
+    saved_post_obj = existing_saved_post.scalar_one_or_none()
+    if saved_post_obj is not None:
+        await session.delete(saved_post_obj)
+        await session.commit()
+
+    return {"detail": "Unsaved", "saved": False}
 
 
 @router.post("/{post_id}/likes", status_code=status.HTTP_200_OK)
