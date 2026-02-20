@@ -38,6 +38,21 @@ router = APIRouter(prefix="/posts", tags=["posts"])
 MAX_POST_CAPTION_LENGTH = 2200
 
 
+def _normalize_caption(caption: str | None) -> str | None:
+    if caption is None:
+        return None
+
+    normalized_caption = caption.strip()
+    if len(normalized_caption) > MAX_POST_CAPTION_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Caption must be at most {MAX_POST_CAPTION_LENGTH} characters",
+        )
+    if normalized_caption == "":
+        return None
+    return normalized_caption
+
+
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], column == value)
 
@@ -99,6 +114,10 @@ class CommentCreateRequest(BaseModel):
     text: str = Field(min_length=1, max_length=500)
 
 
+class PostUpdateRequest(BaseModel):
+    caption: str | None
+
+
 async def _get_like_count(session: AsyncSession, post_id: int) -> int:
     post_id_column = cast(ColumnElement[int], Like.post_id)
     user_id_column = cast(ColumnElement[str], Like.user_id)
@@ -117,16 +136,7 @@ async def create_post(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> PostResponse:
-    normalized_caption = None
-    if caption is not None:
-        normalized_caption = caption.strip()
-        if len(normalized_caption) > MAX_POST_CAPTION_LENGTH:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"Caption must be at most {MAX_POST_CAPTION_LENGTH} characters",
-            )
-        if normalized_caption == "":
-            normalized_caption = None
+    normalized_caption = _normalize_caption(caption)
 
     try:
         data = await read_upload_file(image, settings.upload_max_bytes)
@@ -306,6 +316,59 @@ async def get_post(
         author_name=author_name,
         author_username=author_username,
         author_avatar_key=author_avatar_key,
+        like_count=like_count,
+        viewer_has_liked=viewer_has_liked,
+    )
+
+
+@router.patch("/{post_id}", status_code=status.HTTP_200_OK, response_model=PostResponse)
+async def update_post(
+    post_id: int,
+    payload: PostUpdateRequest,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PostResponse:
+    viewer_id = current_user.id
+    if viewer_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User record missing identifier",
+        )
+
+    post_entity = cast(Any, Post)
+    result = await session.execute(
+        select(post_entity)
+        .where(_eq(Post.id, post_id))
+        .limit(1)
+    )
+    post = result.scalar_one_or_none()
+    if post is None or post.author_id != viewer_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+
+    post.caption = _normalize_caption(payload.caption)
+    session.add(post)
+    try:
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update post",
+        ) from exc
+    await session.refresh(post)
+
+    like_count = 0
+    viewer_has_liked = False
+    if post.id is not None:
+        count_map, liked_set = await collect_like_meta(session, [post.id], viewer_id)
+        like_count = count_map.get(post.id, 0)
+        viewer_has_liked = post.id in liked_set
+
+    return PostResponse.from_post(
+        post,
+        author_name=current_user.name,
+        author_username=current_user.username,
+        author_avatar_key=current_user.avatar_key,
         like_count=like_count,
         viewer_has_liked=viewer_has_liked,
     )

@@ -563,6 +563,168 @@ async def test_delete_post_returns_not_found_for_non_author(
 
 
 @pytest.mark.asyncio
+async def test_update_post_caption_allows_author_and_normalizes_input(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    author_payload = make_user_payload("author_edit")
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    author_id = author_response.json()["id"]
+
+    post = Post(author_id=author_id, image_key="posts/edit-me.jpg", caption="Original")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+    post_id = post.id
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": author_payload["username"], "password": author_payload["password"]},
+    )
+
+    response = await async_client.patch(
+        f"/api/v1/posts/{post_id}",
+        json={"caption": "  Updated caption  "},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == post_id
+    assert payload["caption"] == "Updated caption"
+    assert payload["author_id"] == author_id
+
+    db_session.expire_all()
+    stored_post = await db_session.execute(select(Post).where(_eq(Post.id, post_id)))
+    updated_post = stored_post.scalar_one_or_none()
+    assert updated_post is not None
+    assert updated_post.caption == "Updated caption"
+
+    clear_response = await async_client.patch(
+        f"/api/v1/posts/{post_id}",
+        json={"caption": "   "},
+    )
+    assert clear_response.status_code == 200
+    assert clear_response.json()["caption"] is None
+
+    db_session.expire_all()
+    cleared_post = await db_session.execute(select(Post).where(_eq(Post.id, post_id)))
+    post_after_clear = cleared_post.scalar_one_or_none()
+    assert post_after_clear is not None
+    assert post_after_clear.caption is None
+
+
+@pytest.mark.asyncio
+async def test_update_post_returns_not_found_for_non_author(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    author_payload = make_user_payload("author_edit_guard")
+    outsider_payload = make_user_payload("outsider_guard")
+
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    await async_client.post("/api/v1/auth/register", json=outsider_payload)
+    author_id = author_response.json()["id"]
+
+    post = Post(author_id=author_id, image_key="posts/not-yours-edit.jpg", caption="Hands off")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+    post_id = post.id
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": outsider_payload["username"], "password": outsider_payload["password"]},
+    )
+
+    response = await async_client.patch(
+        f"/api/v1/posts/{post_id}",
+        json={"caption": "stolen"},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Post not found"
+
+    db_session.expire_all()
+    stored_post = await db_session.execute(select(Post).where(_eq(Post.id, post_id)))
+    protected_post = stored_post.scalar_one_or_none()
+    assert protected_post is not None
+    assert protected_post.caption == "Hands off"
+
+
+@pytest.mark.asyncio
+async def test_update_post_rejects_too_long_caption(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    author_payload = make_user_payload("author_edit_long")
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    author_id = author_response.json()["id"]
+
+    post = Post(author_id=author_id, image_key="posts/edit-too-long.jpg", caption="keep me")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+    post_id = post.id
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": author_payload["username"], "password": author_payload["password"]},
+    )
+
+    response = await async_client.patch(
+        f"/api/v1/posts/{post_id}",
+        json={"caption": "x" * 2201},
+    )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert "at most 2200 characters" in response.json()["detail"]
+
+    db_session.expire_all()
+    stored_post = await db_session.execute(select(Post).where(_eq(Post.id, post_id)))
+    unchanged_post = stored_post.scalar_one_or_none()
+    assert unchanged_post is not None
+    assert unchanged_post.caption == "keep me"
+
+
+@pytest.mark.asyncio
+async def test_update_post_rejects_missing_caption_field(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    author_payload = make_user_payload("author_edit_missing")
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    author_id = author_response.json()["id"]
+
+    post = Post(author_id=author_id, image_key="posts/edit-missing.jpg", caption="keep me")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+    post_id = post.id
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": author_payload["username"], "password": author_payload["password"]},
+    )
+
+    response = await async_client.patch(
+        f"/api/v1/posts/{post_id}",
+        json={},
+    )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+    db_session.expire_all()
+    stored_post = await db_session.execute(select(Post).where(_eq(Post.id, post_id)))
+    unchanged_post = stored_post.scalar_one_or_none()
+    assert unchanged_post is not None
+    assert unchanged_post.caption == "keep me"
+
+
+@pytest.mark.asyncio
 async def test_like_is_idempotent_under_concurrency(
     async_client: AsyncClient,
     db_session: AsyncSession,
