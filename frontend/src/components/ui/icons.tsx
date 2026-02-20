@@ -65,6 +65,26 @@ export function SearchIcon({ className, ...props }: IconProps) {
   );
 }
 
+export function CompassIcon({ className, ...props }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={iconClassName(className)}
+      aria-hidden="true"
+      {...props}
+    >
+      <circle cx="12" cy="12" r="8" />
+      <path d="m9.5 14.5 1.5-5 5-1.5-1.5 5-5 1.5Z" />
+      <circle cx="12" cy="12" r=".85" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function CreateIcon({ className, ...props }: IconProps) {
   return (
     <svg

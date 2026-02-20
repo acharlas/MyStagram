@@ -138,6 +138,34 @@ export async function fetchHomeFeedPage(
   }
 }
 
+export async function fetchExploreFeedPage(
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  },
+  accessToken?: string,
+): Promise<ApiPage<FeedPost[]>> {
+  if (!accessToken) {
+    throw new ApiError(401, "Not authenticated");
+  }
+
+  const path = buildPaginatedPath("/api/v1/feed/explore", pagination);
+  try {
+    return await apiServerFetchPage<FeedPost[]>(path, {
+      cache: "no-store",
+      headers: {
+        Cookie: `access_token=${accessToken}`,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    console.error("Failed to fetch explore feed page", error);
+    throw new ApiError(500, "Unable to load explore feed");
+  }
+}
+
 export async function fetchPostCommentsPage(
   postId: string,
   pagination?: {

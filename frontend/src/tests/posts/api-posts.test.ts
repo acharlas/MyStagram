@@ -20,6 +20,7 @@ import {
   createPostComment,
   deletePostCommentRequest,
   deletePostRequest,
+  fetchExploreFeedPage,
   fetchHomeFeedPage,
   fetchPostComments,
   fetchPostCommentsPage,
@@ -180,6 +181,53 @@ describe("fetchHomeFeedPage", () => {
     ).rejects.toMatchObject({
       status: 500,
       message: "Backend down",
+    });
+  });
+});
+
+describe("fetchExploreFeedPage", () => {
+  it("throws when no access token is provided", async () => {
+    await expect(
+      fetchExploreFeedPage({ limit: 10, offset: 0 }),
+    ).rejects.toMatchObject({
+      status: 401,
+      message: "Not authenticated",
+    });
+    expect(apiServerFetchPageMock).not.toHaveBeenCalled();
+  });
+
+  it("fetches explore page with pagination", async () => {
+    apiServerFetchPageMock.mockResolvedValueOnce({
+      data: [],
+      nextOffset: 10,
+    });
+
+    const page = await fetchExploreFeedPage(
+      { limit: 10, offset: 0 },
+      "token123",
+    );
+
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/feed/explore?limit=10",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Cookie: "access_token=token123",
+        }),
+      }),
+    );
+    expect(page.nextOffset).toBe(10);
+  });
+
+  it("preserves backend status codes", async () => {
+    apiServerFetchPageMock.mockRejectedValueOnce(
+      new ApiError(503, "Service unavailable"),
+    );
+
+    await expect(
+      fetchExploreFeedPage({ limit: 10, offset: 0 }, "token123"),
+    ).rejects.toMatchObject({
+      status: 503,
+      message: "Service unavailable",
     });
   });
 });

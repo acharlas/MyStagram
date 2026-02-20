@@ -14,6 +14,7 @@ import {
   BellIcon,
   BookmarkIcon,
   BrandMarkIcon,
+  CompassIcon,
   CloseIcon,
   CreateIcon,
   HomeIcon,
@@ -44,6 +45,7 @@ type NavItem = {
 
 const DESKTOP_PRIMARY_ITEMS: NavItem[] = [
   { href: "/search", label: "Recherche", Icon: SearchIcon },
+  { href: "/explore", label: "Explorer", Icon: CompassIcon },
   { href: "/saved", label: "Sauvegardés", Icon: BookmarkIcon },
 ];
 
@@ -523,6 +525,14 @@ export function NavBar({ username, avatarKey }: NavBarProps) {
           </Link>
           {username ? (
             <>
+              <Link
+                href="/explore"
+                onClick={() => setIsMobileProfileOpen(false)}
+                className="ui-focus-ring ui-hover-surface ui-text-strong flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition"
+              >
+                <CompassIcon className="h-4 w-4" />
+                <span>Explorer</span>
+              </Link>
               <Link
                 href="/saved"
                 onClick={() => setIsMobileProfileOpen(false)}
