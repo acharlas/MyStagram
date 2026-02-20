@@ -1,4 +1,11 @@
-import { ApiError, apiServerFetch } from "./client";
+import type { FeedPost } from "@/types/feed";
+
+import {
+  ApiError,
+  type ApiPage,
+  apiServerFetch,
+  apiServerFetchPage,
+} from "./client";
 
 export type PostDetail = {
   id: number;
@@ -29,6 +36,29 @@ function isValidPostId(postId: string): boolean {
 
 function isValidCommentId(commentId: string): boolean {
   return /^\d+$/.test(commentId);
+}
+
+function buildPaginatedPath(
+  basePath: string,
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  },
+): string {
+  if (!pagination) {
+    return basePath;
+  }
+
+  const params = new URLSearchParams();
+  if (typeof pagination.limit === "number" && pagination.limit > 0) {
+    params.set("limit", String(pagination.limit));
+  }
+  if (typeof pagination.offset === "number" && pagination.offset > 0) {
+    params.set("offset", String(pagination.offset));
+  }
+
+  const query = params.toString();
+  return query ? `${basePath}?${query}` : basePath;
 }
 
 export async function fetchPostDetail(
@@ -77,6 +107,69 @@ export async function fetchPostComments(
       return [];
     }
     throw error;
+  }
+}
+
+export async function fetchHomeFeedPage(
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  },
+  accessToken?: string,
+): Promise<ApiPage<FeedPost[]>> {
+  if (!accessToken) {
+    throw new ApiError(401, "Not authenticated");
+  }
+
+  const path = buildPaginatedPath("/api/v1/feed/home", pagination);
+  try {
+    return await apiServerFetchPage<FeedPost[]>(path, {
+      cache: "no-store",
+      headers: {
+        Cookie: `access_token=${accessToken}`,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    console.error("Failed to fetch feed page", error);
+    throw new ApiError(500, "Unable to load feed");
+  }
+}
+
+export async function fetchPostCommentsPage(
+  postId: string,
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  },
+  accessToken?: string,
+): Promise<ApiPage<PostComment[]>> {
+  if (!accessToken) {
+    throw new ApiError(401, "Not authenticated");
+  }
+  if (!isValidPostId(postId)) {
+    throw new ApiError(400, "Invalid post id");
+  }
+
+  const path = buildPaginatedPath(
+    `/api/v1/posts/${postId}/comments`,
+    pagination,
+  );
+  try {
+    return await apiServerFetchPage<PostComment[]>(path, {
+      cache: "no-store",
+      headers: {
+        Cookie: `access_token=${accessToken}`,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    console.error("Failed to fetch comment page", error);
+    throw new ApiError(500, "Unable to load comments");
   }
 }
 

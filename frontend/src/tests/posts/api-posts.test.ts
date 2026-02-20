@@ -7,15 +7,22 @@ vi.mock("../../lib/api/client", async () => {
   return {
     ...actual,
     apiServerFetch: vi.fn(),
+    apiServerFetchPage: vi.fn(),
   };
 });
 
-import { ApiError, apiServerFetch } from "../../lib/api/client";
+import {
+  ApiError,
+  apiServerFetch,
+  apiServerFetchPage,
+} from "../../lib/api/client";
 import {
   createPostComment,
   deletePostCommentRequest,
   deletePostRequest,
+  fetchHomeFeedPage,
   fetchPostComments,
+  fetchPostCommentsPage,
   fetchPostDetail,
   likePostRequest,
   unlikePostRequest,
@@ -23,6 +30,7 @@ import {
 } from "../../lib/api/posts";
 
 const apiServerFetchMock = vi.mocked(apiServerFetch);
+const apiServerFetchPageMock = vi.mocked(apiServerFetchPage);
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -125,6 +133,108 @@ describe("fetchPostComments", () => {
     apiServerFetchMock.mockRejectedValueOnce(new Error("boom"));
 
     await expect(fetchPostComments("42", "token123")).rejects.toThrow("boom");
+  });
+});
+
+describe("fetchHomeFeedPage", () => {
+  it("throws when no access token is provided", async () => {
+    await expect(
+      fetchHomeFeedPage({ limit: 10, offset: 0 }),
+    ).rejects.toMatchObject({
+      status: 401,
+      message: "Not authenticated",
+    });
+    expect(apiServerFetchPageMock).not.toHaveBeenCalled();
+  });
+
+  it("fetches feed page with pagination", async () => {
+    apiServerFetchPageMock.mockResolvedValueOnce({
+      data: [],
+      nextOffset: 10,
+    });
+
+    const page = await fetchHomeFeedPage({ limit: 10, offset: 0 }, "token123");
+
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/feed/home?limit=10",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Cookie: "access_token=token123",
+        }),
+      }),
+    );
+    expect(page.nextOffset).toBe(10);
+  });
+
+  it("preserves backend status codes", async () => {
+    apiServerFetchPageMock.mockRejectedValueOnce(
+      new ApiError(500, "Backend down"),
+    );
+
+    await expect(
+      fetchHomeFeedPage({ limit: 10, offset: 0 }, "token123"),
+    ).rejects.toMatchObject({
+      status: 500,
+      message: "Backend down",
+    });
+  });
+});
+
+describe("fetchPostCommentsPage", () => {
+  it("fetches paginated comments with cookie header", async () => {
+    apiServerFetchPageMock.mockResolvedValueOnce({
+      data: [
+        {
+          id: 1,
+          author_id: "user-1",
+          author_name: "User One",
+          author_username: "user1",
+          text: "Nice shot!",
+          created_at: "2024-01-01T00:00:00Z",
+        },
+      ],
+      nextOffset: null,
+    });
+
+    const page = await fetchPostCommentsPage(
+      "42",
+      { limit: 20, offset: 20 },
+      "token123",
+    );
+
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/posts/42/comments?limit=20&offset=20",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Cookie: "access_token=token123",
+        }),
+      }),
+    );
+    expect(page.data).toHaveLength(1);
+    expect(page.nextOffset).toBeNull();
+  });
+
+  it("throws on invalid post id", async () => {
+    await expect(
+      fetchPostCommentsPage("invalid", { limit: 20, offset: 0 }, "token123"),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "Invalid post id",
+    });
+    expect(apiServerFetchPageMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves backend error status", async () => {
+    apiServerFetchPageMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+
+    await expect(
+      fetchPostCommentsPage("42", { limit: 20, offset: 0 }, "token123"),
+    ).rejects.toMatchObject({
+      status: 404,
+      message: "Post not found",
+    });
   });
 });
 
