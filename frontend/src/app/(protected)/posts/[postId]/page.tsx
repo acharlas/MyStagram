@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { CommentForm } from "@/components/post/CommentForm";
+import { DeletePostButton } from "@/components/post/DeletePostButton";
 import { LikeButton } from "@/components/post/LikeButton";
 import { Avatar, AvatarImage } from "@/components/ui/avatar";
 import { CommentIcon } from "@/components/ui/icons";
@@ -15,6 +16,8 @@ export default async function PostDetailPage({ params }: PostPageProps) {
   const { postId } = await params;
   const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
+  const viewerUserId = session?.user?.id ?? null;
+  const viewerUsername = session?.user?.username ?? null;
 
   const [post, comments] = await Promise.all([
     fetchPostDetail(postId, accessToken),
@@ -34,6 +37,10 @@ export default async function PostDetailPage({ params }: PostPageProps) {
   const authorUsername = post.author_username ?? undefined;
   const authorAvatarUrl = buildAvatarUrl(post.author_avatar_key);
   const imageUrl = buildImageUrl(post.image_key);
+  const canDeletePost = viewerUserId === post.author_id;
+  const deleteRedirectHref = viewerUsername
+    ? `/users/${encodeURIComponent(viewerUsername)}`
+    : null;
 
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-5 py-2 lg:h-[84vh] lg:flex-row lg:gap-4">
@@ -81,6 +88,12 @@ export default async function PostDetailPage({ params }: PostPageProps) {
           <p className="ui-text-muted mt-2 text-sm leading-relaxed">
             {post.caption || "Aucune légende"}
           </p>
+          {canDeletePost && deleteRedirectHref ? (
+            <DeletePostButton
+              postId={post.id}
+              redirectHref={deleteRedirectHref}
+            />
+          ) : null}
         </header>
 
         <div className="flex-1 overflow-y-auto pr-1">
