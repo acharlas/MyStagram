@@ -85,6 +85,10 @@ type DeletePostResponse = {
   detail: string;
 };
 
+type UpdatePostResponse = {
+  caption: string | null;
+};
+
 export async function likePostRequest(
   postId: string,
   accessToken?: string,
@@ -185,6 +189,44 @@ export async function createPostComment(
     }
     console.error("Failed to create comment", error);
     throw new ApiError(500, "Unable to create comment");
+  }
+}
+
+export async function updatePostCaptionRequest(
+  postId: string,
+  caption: string | null,
+  accessToken?: string,
+): Promise<string | null> {
+  if (!accessToken) {
+    throw new ApiError(401, "Not authenticated");
+  }
+  if (!isValidPostId(postId)) {
+    throw new ApiError(400, "Invalid post id");
+  }
+
+  try {
+    const payload = await apiServerFetch<UpdatePostResponse>(
+      `/api/v1/posts/${postId}`,
+      {
+        method: "PATCH",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `access_token=${accessToken}`,
+        },
+        body: JSON.stringify({ caption }),
+      },
+    );
+    if ("caption" in payload) {
+      return payload.caption ?? null;
+    }
+    throw new ApiError(502, "Backend response is missing caption");
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    console.error("Failed to update post caption", error);
+    throw new ApiError(500, "Unable to update post");
   }
 }
 

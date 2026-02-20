@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { CommentForm } from "@/components/post/CommentForm";
 import { DeletePostButton } from "@/components/post/DeletePostButton";
+import { EditPostCaption } from "@/components/post/EditPostCaption";
 import { LikeButton } from "@/components/post/LikeButton";
 import { Avatar, AvatarImage } from "@/components/ui/avatar";
 import { CommentIcon } from "@/components/ui/icons";
@@ -37,7 +38,7 @@ export default async function PostDetailPage({ params }: PostPageProps) {
   const authorUsername = post.author_username ?? undefined;
   const authorAvatarUrl = buildAvatarUrl(post.author_avatar_key);
   const imageUrl = buildImageUrl(post.image_key);
-  const canDeletePost = viewerUserId === post.author_id;
+  const canManagePost = viewerUserId === post.author_id;
   const deleteRedirectHref = viewerUsername
     ? `/users/${encodeURIComponent(viewerUsername)}`
     : null;
@@ -85,10 +86,14 @@ export default async function PostDetailPage({ params }: PostPageProps) {
               </p>
             )}
           </div>
-          <p className="ui-text-muted mt-2 text-sm leading-relaxed">
-            {post.caption || "Aucune légende"}
-          </p>
-          {canDeletePost && deleteRedirectHref ? (
+          {canManagePost ? (
+            <EditPostCaption postId={post.id} initialCaption={post.caption} />
+          ) : (
+            <p className="ui-text-muted mt-2 text-sm leading-relaxed whitespace-pre-wrap">
+              {post.caption || "Aucune légende"}
+            </p>
+          )}
+          {canManagePost && deleteRedirectHref ? (
             <DeletePostButton
               postId={post.id}
               redirectHref={deleteRedirectHref}

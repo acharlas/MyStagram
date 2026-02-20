@@ -6,6 +6,7 @@ const getSessionServerMock = vi.hoisted(() => vi.fn());
 const fetchPostDetailMock = vi.hoisted(() => vi.fn());
 const fetchPostCommentsMock = vi.hoisted(() => vi.fn());
 const deletePostButtonMock = vi.hoisted(() => vi.fn());
+const editPostCaptionMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
   getSessionServer: getSessionServerMock,
@@ -31,6 +32,16 @@ vi.mock("@/components/post/DeletePostButton", () => ({
   },
 }));
 
+vi.mock("@/components/post/EditPostCaption", () => ({
+  EditPostCaption: (props: {
+    postId: number;
+    initialCaption: string | null;
+  }) => {
+    editPostCaptionMock(props);
+    return null;
+  },
+}));
+
 import PostDetailPage from "@/app/(protected)/posts/[postId]/page";
 
 (globalThis as unknown as { React: typeof React }).React = React;
@@ -40,6 +51,7 @@ afterEach(() => {
   fetchPostDetailMock.mockReset();
   fetchPostCommentsMock.mockReset();
   deletePostButtonMock.mockReset();
+  editPostCaptionMock.mockReset();
 });
 
 describe("PostDetailPage delete redirect semantics", () => {
@@ -72,6 +84,11 @@ describe("PostDetailPage delete redirect semantics", () => {
       postId: 42,
       redirectHref: "/users/viewer",
     });
+    expect(editPostCaptionMock).toHaveBeenCalledTimes(1);
+    expect(editPostCaptionMock).toHaveBeenCalledWith({
+      postId: 42,
+      initialCaption: null,
+    });
   });
 
   it("hides delete action if profile redirect cannot be determined", async () => {
@@ -99,5 +116,6 @@ describe("PostDetailPage delete redirect semantics", () => {
     );
 
     expect(deletePostButtonMock).not.toHaveBeenCalled();
+    expect(editPostCaptionMock).toHaveBeenCalledTimes(1);
   });
 });

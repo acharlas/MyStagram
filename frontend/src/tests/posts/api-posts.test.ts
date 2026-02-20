@@ -18,6 +18,7 @@ import {
   fetchPostDetail,
   likePostRequest,
   unlikePostRequest,
+  updatePostCaptionRequest,
 } from "../../lib/api/posts";
 
 const apiServerFetchMock = vi.mocked(apiServerFetch);
@@ -227,6 +228,50 @@ describe("createPostComment", () => {
     ).rejects.toMatchObject({
       status: 500,
       name: "ApiError",
+    });
+  });
+});
+
+describe("updatePostCaptionRequest", () => {
+  it("sends PATCH to post endpoint", async () => {
+    apiServerFetchMock.mockResolvedValueOnce({ caption: "Updated" });
+
+    await expect(
+      updatePostCaptionRequest("42", "Updated", "token123"),
+    ).resolves.toBe("Updated");
+
+    expect(apiServerFetchMock).toHaveBeenCalledWith(
+      "/api/v1/posts/42",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          Cookie: "access_token=token123",
+        }),
+        body: JSON.stringify({ caption: "Updated" }),
+      }),
+    );
+  });
+
+  it("throws on invalid post id", async () => {
+    await expect(
+      updatePostCaptionRequest("abc", "Updated", "token123"),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "Invalid post id",
+    });
+    expect(apiServerFetchMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves backend error status", async () => {
+    apiServerFetchMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+    await expect(
+      updatePostCaptionRequest("42", "Updated", "token123"),
+    ).rejects.toMatchObject({
+      status: 404,
+      message: "Post not found",
     });
   });
 });
