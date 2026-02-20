@@ -6,6 +6,7 @@ from .follow import Follow
 from .like import Like
 from .post import Post
 from .refresh_token import RefreshToken
+from .saved_post import SavedPost
 from .user import User
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "Comment",
     "DismissedNotification",
     "RefreshToken",
+    "SavedPost",
 ]

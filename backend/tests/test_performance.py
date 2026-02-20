@@ -46,6 +46,20 @@ async def test_like_table_has_post_updated_at_index(db_session: AsyncSession) ->
 
 
 @pytest.mark.asyncio
+async def test_saved_posts_table_has_user_created_at_index(db_session: AsyncSession) -> None:
+    bind = db_session.bind
+    assert isinstance(bind, AsyncEngine)
+    async with bind.connect() as conn:
+        indexes = await conn.run_sync(
+            lambda sync_conn: inspect(sync_conn).get_indexes("saved_posts")
+        )
+    assert any(
+        index["name"] == "ix_saved_posts_user_created_at_post_id"
+        for index in indexes
+    )
+
+
+@pytest.mark.asyncio
 async def test_feed_query_is_fast(async_client: AsyncClient, db_session: AsyncSession) -> None:
     viewer_payload = {
         "username": "viewer_perf",
