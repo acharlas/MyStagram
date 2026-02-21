@@ -6,6 +6,7 @@ import {
   CommentIcon,
   UserPlusIcon,
 } from "@/components/ui/icons";
+import { resolveOwnRequestsHref } from "@/components/ui/navbar-helpers";
 import type {
   FollowRequest,
   InboxEvent,
@@ -14,6 +15,7 @@ import type {
 type NavbarInboxPanelProps = {
   notifications: InboxEvent[];
   followRequests: FollowRequest[];
+  viewerUsername?: string;
   isLoading: boolean;
   isRefreshing: boolean;
   error: string | null;
@@ -56,6 +58,7 @@ function formatRelativeTime(rawDate: string | null): string {
 export function NavbarInboxPanel({
   notifications,
   followRequests,
+  viewerUsername,
   isLoading,
   isRefreshing,
   error,
@@ -179,7 +182,7 @@ export function NavbarInboxPanel({
 
       <section className="mt-3 border-t ui-border pt-3">
         <div className="ui-text-muted flex items-center justify-between px-1 text-xs font-semibold tracking-[0.08em]">
-          <span>Follow</span>
+          <span>Demandes</span>
           <span>{followRequests.length}</span>
         </div>
         <div className="mt-2 space-y-2">
@@ -189,7 +192,7 @@ export function NavbarInboxPanel({
               className="flex items-start gap-2 rounded-xl px-3 py-2 transition hover:bg-[color:var(--ui-surface-muted)]"
             >
               <Link
-                href={request.href}
+                href={resolveOwnRequestsHref(viewerUsername)}
                 onClick={() => {
                   onNotificationRead(request.id);
                   onNavigate();
@@ -201,7 +204,8 @@ export function NavbarInboxPanel({
                 </span>
                 <span className="min-w-0">
                   <span className="ui-text-strong block text-sm">
-                    <span className="font-semibold">{request.name}</span>{" "}
+                    <span className="font-semibold">{request.name}</span> vous a
+                    envoyé une demande{" "}
                     <span className="ui-text-muted">@{request.username}</span>
                   </span>
                   <span className="ui-text-muted block text-xs">
@@ -218,7 +222,7 @@ export function NavbarInboxPanel({
                   onNotificationRead(request.id);
                 }}
                 className="ui-focus-ring ui-text-muted ui-hover-surface rounded-full p-1 transition hover:text-[color:var(--ui-text-strong)]"
-                aria-label="Supprimer la notification de suivi"
+                aria-label="Supprimer la notification de demande de suivi"
               >
                 <CloseIcon className="h-3.5 w-3.5" />
               </button>

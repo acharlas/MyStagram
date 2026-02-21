@@ -248,6 +248,7 @@ export function NavBar({ username, avatarKey }: NavBarProps) {
               <NavbarInboxPanel
                 notifications={notifications}
                 followRequests={followRequests}
+                viewerUsername={username}
                 isLoading={isInboxLoading}
                 isRefreshing={isInboxRefreshing}
                 error={inboxError}
@@ -502,6 +503,7 @@ export function NavBar({ username, avatarKey }: NavBarProps) {
         <NavbarInboxPanel
           notifications={notifications}
           followRequests={followRequests}
+          viewerUsername={username}
           isLoading={isInboxLoading}
           isRefreshing={isInboxRefreshing}
           error={inboxError}

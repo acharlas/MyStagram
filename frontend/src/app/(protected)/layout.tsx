@@ -43,7 +43,11 @@ export default async function ProtectedLayout({
     return null;
   }
 
-  const username = session.user?.username ?? "";
+  const username = session.user?.username;
+  if (typeof username !== "string" || username.trim().length === 0) {
+    redirect("/login");
+    return null;
+  }
   const accessToken = session.accessToken as string;
   const avatarKey =
     (await fetchCurrentAvatarKey(accessToken)) ??

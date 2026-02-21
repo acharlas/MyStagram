@@ -92,6 +92,19 @@ describe("protected layout", () => {
     expect(navBarMock).not.toHaveBeenCalled();
   });
 
+  it("redirects to login when session username is missing", async () => {
+    getSessionServerMock.mockResolvedValueOnce({
+      accessToken: "access-token",
+      user: { username: "" },
+    });
+
+    await ProtectedLayout({ children: <div /> });
+
+    expect(redirectMock).toHaveBeenCalledWith("/login");
+    expect(apiServerFetchMock).not.toHaveBeenCalled();
+    expect(navBarMock).not.toHaveBeenCalled();
+  });
+
   it("renders layout when session is valid", async () => {
     apiServerFetchMock.mockResolvedValueOnce({
       avatar_key: "avatars/from-profile.png",

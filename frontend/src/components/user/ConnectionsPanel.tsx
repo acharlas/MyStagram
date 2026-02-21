@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { Avatar, AvatarImage } from "@/components/ui/avatar";
+import { buildPathWithoutSearchParam } from "@/components/ui/navbar-helpers";
 import { ApiError, type ApiPage } from "@/lib/api/client";
 import {
   fetchUserConnections,
@@ -52,10 +54,22 @@ function profileHref(username: string): string {
   return `/users/${encodeURIComponent(username)}`;
 }
 
+function parsePanelQueryParam(
+  value: string | null,
+): UserConnectionsKind | null {
+  if (value === "followers" || value === "following" || value === "requests") {
+    return value;
+  }
+  return null;
+}
+
 export function ConnectionsPanel({
   username,
   isOwnProfile = false,
 }: ConnectionsPanelProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const availablePanels: UserConnectionsKind[] = isOwnProfile
     ? ["followers", "following", "requests"]
     : ["followers", "following"];
@@ -81,6 +95,7 @@ export function ConnectionsPanel({
   const [pendingRequestUsername, setPendingRequestUsername] = useState<
     string | null
   >(null);
+  const handledAutoOpenPanelRef = useRef<UserConnectionsKind | null>(null);
 
   const activeOffset = offsetByKind[activePanel];
   const activePage = pageByKind[activePanel];
@@ -131,17 +146,40 @@ export function ConnectionsPanel({
     };
   }, [activeOffset, activePanel, isOpen, username]);
 
-  const openPanel = (panel: UserConnectionsKind) => {
+  const openPanel = useCallback((panel: UserConnectionsKind) => {
     setOffsetByKind((previous) => ({ ...previous, [panel]: 0 }));
     setPageByKind((previous) => ({ ...previous, [panel]: null }));
     setErrorByKind((previous) => ({ ...previous, [panel]: null }));
     setActivePanel(panel);
     setIsOpen(true);
-  };
+  }, []);
 
-  const closePanel = () => {
+  const closePanel = useCallback(() => {
     setIsOpen(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    const requestedPanel = parsePanelQueryParam(searchParams.get("panel"));
+    if (!requestedPanel) {
+      handledAutoOpenPanelRef.current = null;
+      return;
+    }
+    const nextPath = buildPathWithoutSearchParam(
+      pathname,
+      searchParams,
+      "panel",
+    );
+    if (!isOwnProfile && requestedPanel === "requests") {
+      router.replace(nextPath, { scroll: false });
+      return;
+    }
+    if (handledAutoOpenPanelRef.current === requestedPanel) {
+      return;
+    }
+    handledAutoOpenPanelRef.current = requestedPanel;
+    openPanel(requestedPanel);
+    router.replace(nextPath, { scroll: false });
+  }, [isOwnProfile, openPanel, pathname, router, searchParams]);
 
   const goToPreviousPage = () => {
     setOffsetByKind((previous) => ({

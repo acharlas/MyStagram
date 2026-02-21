@@ -37,6 +37,11 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("next/navigation", () => ({
   notFound: notFoundMock,
+  usePathname: () => "/users/alice",
+  useRouter: () => ({
+    replace: vi.fn(),
+  }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("@/lib/api/users", async () => {

@@ -25,6 +25,11 @@ vi.mock("@/lib/api/users", () => ({
 
 vi.mock("next/navigation", () => ({
   notFound: notFoundMock,
+  usePathname: () => "/users/alice",
+  useRouter: () => ({
+    replace: vi.fn(),
+  }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 import UserProfilePage from "@/app/(protected)/users/[username]/page";
