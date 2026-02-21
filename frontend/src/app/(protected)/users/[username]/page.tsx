@@ -124,7 +124,7 @@ export default async function UserProfilePage({
                 </p>
               ) : null}
               {profile.bio ? (
-                <p className="ui-text-muted max-w-xl text-sm leading-relaxed">
+                <p className="ui-text-muted max-w-xl whitespace-pre-wrap break-words text-sm leading-relaxed">
                   {profile.bio}
                 </p>
               ) : null}
