@@ -12,6 +12,7 @@ from sqlalchemy.sql import ColumnElement
 
 from models import Follow, Like, Post, User
 from services.auth import DEFAULT_AVATAR_OBJECT_KEY
+from services.account_blocks import build_not_blocked_either_direction_filter
 from .pagination import set_next_offset_header
 
 
@@ -83,10 +84,16 @@ async def collect_like_meta(
     post_id_column = cast(ColumnElement[int], Like.post_id)
     user_id_column = cast(ColumnElement[str], Like.user_id)
     count_column = cast(Any, func.count(user_id_column))
+    count_query = select(post_id_column, count_column).where(post_id_column.in_(post_ids))
+    if viewer_id is not None:
+        count_query = count_query.where(
+            build_not_blocked_either_direction_filter(
+                viewer_id=viewer_id,
+                candidate_user_id_column=user_id_column,
+            )
+        )
     count_result = await session.execute(
-        select(post_id_column, count_column)
-        .where(post_id_column.in_(post_ids))
-        .group_by(post_id_column)
+        count_query.group_by(post_id_column)
     )
     count_map = {post_id: int(total) for post_id, total in count_result.all()}
 
@@ -97,6 +104,10 @@ async def collect_like_meta(
         select(post_id_column).where(
             _eq(user_id_column, viewer_id),
             post_id_column.in_(post_ids),
+            build_not_blocked_either_direction_filter(
+                viewer_id=viewer_id,
+                candidate_user_id_column=user_id_column,
+            ),
         )
     )
     liked_set = {row[0] for row in viewer_result.all()}
@@ -153,7 +164,13 @@ async def build_home_feed(
         )
         .join(User, _eq(User.id, Post.author_id))
         .join(Follow, _eq(Follow.followee_id, Post.author_id))
-        .where(_eq(Follow.follower_id, viewer_id))
+        .where(
+            _eq(Follow.follower_id, viewer_id),
+            build_not_blocked_either_direction_filter(
+                viewer_id=viewer_id,
+                candidate_user_id_column=cast(ColumnElement[str], Post.author_id),
+            ),
+        )
         .order_by(
             _desc(post_created_at),
             _desc(post_id_column),
@@ -221,6 +238,10 @@ async def build_explore_feed(
             _ne(post_author_column, viewer_id),
             cast(ColumnElement[bool], follow_followee_column.is_(None)),
             _eq(User.is_private, False),  # noqa: E712
+            build_not_blocked_either_direction_filter(
+                viewer_id=viewer_id,
+                candidate_user_id_column=post_author_column,
+            ),
         )
         .order_by(
             _desc(post_created_at),

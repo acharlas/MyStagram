@@ -422,6 +422,80 @@ async def test_get_post_comments_are_visible_to_any_authenticated_user(
 
 
 @pytest.mark.asyncio
+async def test_get_post_comments_hide_blocked_authors_for_viewer(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("viewer_block_comments")
+    author_payload = make_user_payload("author_block_comments")
+    blocked_payload = make_user_payload("blocked_commenter")
+    visible_payload = make_user_payload("visible_commenter")
+
+    viewer_response = await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    blocked_response = await async_client.post("/api/v1/auth/register", json=blocked_payload)
+    visible_response = await async_client.post("/api/v1/auth/register", json=visible_payload)
+
+    viewer_id = viewer_response.json()["id"]
+    author_id = author_response.json()["id"]
+    blocked_id = blocked_response.json()["id"]
+    visible_id = visible_response.json()["id"]
+
+    post = Post(author_id=author_id, image_key="posts/block-comments.jpg", caption="Comments")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+
+    now = datetime.now(timezone.utc)
+    db_session.add_all(
+        [
+            Comment(
+                post_id=post.id,
+                author_id=visible_id,
+                text="Visible comment",
+                created_at=now,
+                updated_at=now,
+            ),
+            Comment(
+                post_id=post.id,
+                author_id=blocked_id,
+                text="Blocked comment",
+                created_at=now + timedelta(seconds=5),
+                updated_at=now + timedelta(seconds=5),
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{blocked_payload['username']}/block")
+
+    response = await async_client.get(f"/api/v1/posts/{post.id}/comments")
+    assert response.status_code == 200
+    assert [item["text"] for item in response.json()] == ["Visible comment"]
+
+    viewer_comment = Comment(
+        post_id=post.id,
+        author_id=viewer_id,
+        text="Viewer comment",
+        created_at=now + timedelta(seconds=10),
+        updated_at=now + timedelta(seconds=10),
+    )
+    db_session.add(viewer_comment)
+    await db_session.commit()
+
+    second_response = await async_client.get(f"/api/v1/posts/{post.id}/comments")
+    assert second_response.status_code == 200
+    assert [item["text"] for item in second_response.json()] == [
+        "Viewer comment",
+        "Visible comment",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_get_post_likes_are_visible_to_any_authenticated_user(
     async_client: AsyncClient,
     db_session: AsyncSession,
@@ -510,6 +584,63 @@ async def test_get_post_likes_are_visible_to_any_authenticated_user(
     )
     visible = await async_client.get(f"/api/v1/posts/{post_id}/likes")
     assert visible.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_get_post_likes_hide_blocked_users_for_viewer(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("viewer_block_likes")
+    author_payload = make_user_payload("author_block_likes")
+    blocked_payload = make_user_payload("blocked_liker")
+    visible_payload = make_user_payload("visible_liker")
+
+    await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    blocked_response = await async_client.post("/api/v1/auth/register", json=blocked_payload)
+    visible_response = await async_client.post("/api/v1/auth/register", json=visible_payload)
+
+    author_id = author_response.json()["id"]
+    blocked_id = blocked_response.json()["id"]
+    visible_id = visible_response.json()["id"]
+
+    post = Post(author_id=author_id, image_key="posts/block-likes.jpg", caption="Likes")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+    post_id = post.id
+
+    now = datetime.now(timezone.utc)
+    db_session.add_all(
+        [
+            Like(
+                user_id=visible_id,
+                post_id=post_id,
+                created_at=now,
+                updated_at=now,
+            ),
+            Like(
+                user_id=blocked_id,
+                post_id=post_id,
+                created_at=now + timedelta(seconds=5),
+                updated_at=now + timedelta(seconds=5),
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{blocked_payload['username']}/block")
+
+    response = await async_client.get(f"/api/v1/posts/{post_id}/likes")
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [visible_id]
 
 
 @pytest.mark.asyncio
@@ -1428,6 +1559,84 @@ async def test_feed_returns_followee_posts(
     assert all(item["author_id"] in {followee1_id, followee2_id} for item in feed)
     assert all(item["like_count"] == 0 for item in feed)
     assert all(item["viewer_has_liked"] is False for item in feed)
+
+
+@pytest.mark.asyncio
+async def test_feed_like_count_excludes_blocked_likers(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("v_feed")
+    followee_payload = make_user_payload("f_feed")
+    blocked_liker_payload = make_user_payload("b_liker")
+    visible_liker_payload = make_user_payload("v_liker")
+
+    await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    followee_response = await async_client.post("/api/v1/auth/register", json=followee_payload)
+    blocked_response = await async_client.post(
+        "/api/v1/auth/register",
+        json=blocked_liker_payload,
+    )
+    visible_response = await async_client.post(
+        "/api/v1/auth/register",
+        json=visible_liker_payload,
+    )
+
+    followee_id = followee_response.json()["id"]
+    blocked_liker_id = blocked_response.json()["id"]
+    visible_liker_id = visible_response.json()["id"]
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{followee_payload['username']}/follow")
+
+    now = datetime.now(timezone.utc)
+    post = Post(
+        author_id=followee_id,
+        image_key="feed/blocked-like-count.jpg",
+        caption="Blocked like count",
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+
+    db_session.add(Follow(follower_id=blocked_liker_id, followee_id=followee_id))
+    db_session.add(Follow(follower_id=visible_liker_id, followee_id=followee_id))
+    db_session.add_all(
+        [
+            Like(
+                user_id=blocked_liker_id,
+                post_id=post.id,
+                created_at=now + timedelta(seconds=2),
+                updated_at=now + timedelta(seconds=2),
+            ),
+            Like(
+                user_id=visible_liker_id,
+                post_id=post.id,
+                created_at=now + timedelta(seconds=1),
+                updated_at=now + timedelta(seconds=1),
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    initial_feed = await async_client.get("/api/v1/posts/feed")
+    assert initial_feed.status_code == 200
+    assert initial_feed.json()[0]["like_count"] == 2
+
+    await async_client.post(f"/api/v1/users/{blocked_liker_payload['username']}/block")
+
+    filtered_feed = await async_client.get("/api/v1/posts/feed")
+    assert filtered_feed.status_code == 200
+    assert filtered_feed.json()[0]["like_count"] == 1
+    assert filtered_feed.json()[0]["author_id"] == followee_id
+    assert filtered_feed.json()[0]["viewer_has_liked"] is False
 
 
 @pytest.mark.asyncio

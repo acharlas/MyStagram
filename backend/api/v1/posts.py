@@ -29,6 +29,7 @@ from services import (
     process_image_bytes,
     read_upload_file,
 )
+from services.account_blocks import build_not_blocked_either_direction_filter
 from services.post_policy import (
     build_author_view_filter,
     require_post_interaction_access,
@@ -130,13 +131,24 @@ class SavedPostStatusResponse(BaseModel):
     is_saved: bool
 
 
-async def _get_like_count(session: AsyncSession, post_id: int) -> int:
+async def _get_like_count(
+    session: AsyncSession,
+    post_id: int,
+    *,
+    viewer_id: str | None = None,
+) -> int:
     post_id_column = cast(ColumnElement[int], Like.post_id)
     user_id_column = cast(ColumnElement[str], Like.user_id)
     count_column = cast(Any, func.count(user_id_column))
-    result = await session.execute(
-        select(count_column).where(_eq(post_id_column, post_id))
-    )
+    query = select(count_column).where(_eq(post_id_column, post_id))
+    if viewer_id is not None:
+        query = query.where(
+            build_not_blocked_either_direction_filter(
+                viewer_id=viewer_id,
+                candidate_user_id_column=user_id_column,
+            )
+        )
+    result = await session.execute(query)
     count = result.scalar_one()
     return int(count or 0)
 
@@ -536,10 +548,17 @@ async def get_post_comments(
     comment_entity = cast(Any, Comment)
     author_name_column = cast(ColumnElement[str | None], User.name)
     author_username_column = cast(ColumnElement[str | None], User.username)
+    comment_author_column = cast(ColumnElement[str], Comment.author_id)
     query = (
         select(comment_entity, author_name_column, author_username_column)
         .join(User, _eq(User.id, Comment.author_id))
-        .where(_eq(Comment.post_id, post_id))
+        .where(
+            _eq(Comment.post_id, post_id),
+            build_not_blocked_either_direction_filter(
+                viewer_id=viewer_id,
+                candidate_user_id_column=comment_author_column,
+            ),
+        )
         .order_by(
             _desc(cast(Any, Comment.created_at)),
             _desc(cast(Any, Comment.id)),
@@ -801,7 +820,13 @@ async def get_post_likes(
             avatar_key_column,
         )
         .join(Like, _eq(Like.user_id, User.id))
-        .where(_eq(like_post_id_column, post_id))
+        .where(
+            _eq(like_post_id_column, post_id),
+            build_not_blocked_either_direction_filter(
+                viewer_id=viewer_id,
+                candidate_user_id_column=like_user_id_column,
+            ),
+        )
         .order_by(
             _desc(like_updated_at_column),
             _desc(like_user_id_column),
@@ -866,7 +891,7 @@ async def like_post(
             await session.rollback()
             if not is_unique_violation(exc):
                 raise
-    like_count = await _get_like_count(session, post_id)
+    like_count = await _get_like_count(session, post_id, viewer_id=viewer_id)
     return {"detail": "Liked", "like_count": like_count}
 
 
@@ -901,5 +926,5 @@ async def unlike_post(
     if like_obj is not None:
         await session.delete(like_obj)
         await session.commit()
-    like_count = await _get_like_count(session, post_id)
+    like_count = await _get_like_count(session, post_id, viewer_id=viewer_id)
     return {"detail": "Unliked", "like_count": like_count}
