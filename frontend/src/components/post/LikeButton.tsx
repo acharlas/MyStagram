@@ -6,6 +6,8 @@ type LikeButtonProps = {
   postId: number;
   initialLiked?: boolean;
   initialCount?: number;
+  onCountClick?: () => void;
+  countButtonAriaLabel?: string;
 };
 
 function HeartIcon({ filled }: { filled: boolean }) {
@@ -33,6 +35,8 @@ export function LikeButton({
   postId,
   initialLiked = false,
   initialCount = 0,
+  onCountClick,
+  countButtonAriaLabel = "Voir les likes",
 }: LikeButtonProps) {
   const [liked, setLiked] = useState(initialLiked);
   const [count, setCount] = useState(initialCount);
@@ -83,9 +87,20 @@ export function LikeButton({
       >
         <HeartIcon filled={liked} />
       </button>
-      <span aria-live="polite" className="text-sm font-medium">
-        {count}
-      </span>
+      {onCountClick ? (
+        <button
+          type="button"
+          onClick={onCountClick}
+          className="ui-focus-ring rounded-md px-1 text-sm font-medium transition hover:text-[color:var(--ui-text-strong)] focus:outline-none"
+          aria-label={countButtonAriaLabel}
+        >
+          {count}
+        </button>
+      ) : (
+        <span aria-live="polite" className="text-sm font-medium">
+          {count}
+        </span>
+      )}
     </div>
   );
 }

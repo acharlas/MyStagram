@@ -5,7 +5,7 @@ import { CommentForm } from "@/components/post/CommentForm";
 import { CommentList } from "@/components/post/CommentList";
 import { DeletePostButton } from "@/components/post/DeletePostButton";
 import { EditPostCaption } from "@/components/post/EditPostCaption";
-import { LikeButton } from "@/components/post/LikeButton";
+import { PostLikeSection } from "@/components/post/PostLikeSection";
 import { SavePostButton } from "@/components/post/SavePostButton";
 import { Avatar, AvatarImage } from "@/components/ui/avatar";
 import { CommentIcon } from "@/components/ui/icons";
@@ -159,7 +159,7 @@ export default async function PostDetailPage({ params }: PostPageProps) {
 
         <footer className="mt-4 border-t ui-border pt-4">
           <div className="ui-text-muted flex items-center gap-3">
-            <LikeButton
+            <PostLikeSection
               postId={post.id}
               initialLiked={post.viewer_has_liked}
               initialCount={post.like_count}
