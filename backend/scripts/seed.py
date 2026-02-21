@@ -685,8 +685,9 @@ async def ensure_saved_posts(
         if saver.id is None or author.id is None:
             raise ValueError("Seed users missing identifiers")
 
+        post_id_column = cast(ColumnElement[int], Post.id)
         post_id_result = await session.execute(
-            select(Post.id).where(
+            select(post_id_column).where(
                 _eq(Post.author_id, author.id),
                 _eq(Post.image_key, image_key),
             )

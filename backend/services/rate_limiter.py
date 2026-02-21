@@ -27,6 +27,11 @@ class SupportsRateLimitClient(Protocol):
     async def expire(self, key: str, ttl: int) -> None: ...
 
 
+@runtime_checkable
+class SupportsRateLimiter(Protocol):
+    async def allow(self, key: str) -> bool: ...
+
+
 ACCESS_COOKIE_NAME = "access_token"
 REFRESH_COOKIE_NAME = "refresh_token"
 SUPPORTED_TOKEN_TYPES = frozenset({"access", "refresh"})
@@ -256,13 +261,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app: ASGIApp,
-        limiter_factory: Callable[[], RateLimiter],
+        limiter_factory: Callable[[], SupportsRateLimiter],
         exempt_paths: Iterable[str] | None = None,
         exempt_prefixes: Iterable[str] | None = None,
         client_identifier: Callable[[Request], str] | None = None,
     ) -> None:
         super().__init__(app)
-        self._limiter: RateLimiter | None = None
+        self._limiter: SupportsRateLimiter | None = None
         self.limiter_factory = limiter_factory
         self.exempt_paths = set(exempt_paths or ())
         self.exempt_prefixes = tuple(exempt_prefixes or ())
@@ -308,7 +313,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         return await call_next(request)
 
-    def _get_limiter(self) -> RateLimiter | None:
+    def _get_limiter(self) -> SupportsRateLimiter | None:
         if self._limiter is None:
             try:
                 self._limiter = self.limiter_factory()
