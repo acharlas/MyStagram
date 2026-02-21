@@ -59,6 +59,8 @@ describe("UserProfilePage error semantics", () => {
       is_following: false,
       is_requested: false,
       is_private: false,
+      is_blocked: false,
+      is_blocked_by: false,
     });
 
     await expect(

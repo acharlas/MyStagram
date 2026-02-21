@@ -66,11 +66,20 @@ describe("getWhoToFollowSuggestions", () => {
         user("u-alice", "alice"),
         user("u-bob", "bob"),
       ])
-      .mockResolvedValueOnce([user("u-alice", "alice"), user("u-carol", "carol")])
+      .mockResolvedValueOnce([
+        user("u-alice", "alice"),
+        user("u-carol", "carol"),
+      ])
       .mockResolvedValueOnce([user("u-dave", "dave")]);
 
     fetchUserFollowStatusMock.mockImplementation(async (username: string) => {
-      return username === "bob";
+      return {
+        is_following: username === "bob",
+        is_requested: false,
+        is_private: false,
+        is_blocked: false,
+        is_blocked_by: false,
+      };
     });
 
     const suggestions = await getWhoToFollowSuggestions("token-1", "viewer");
@@ -89,7 +98,13 @@ describe("getWhoToFollowSuggestions", () => {
       .mockRejectedValueOnce(new Error("search failed"))
       .mockResolvedValueOnce([user("u-alice", "alice")])
       .mockResolvedValueOnce([user("u-bob", "bob")]);
-    fetchUserFollowStatusMock.mockResolvedValue(false);
+    fetchUserFollowStatusMock.mockResolvedValue({
+      is_following: false,
+      is_requested: false,
+      is_private: false,
+      is_blocked: false,
+      is_blocked_by: false,
+    });
 
     const suggestions = await getWhoToFollowSuggestions("token-1", "viewer");
 

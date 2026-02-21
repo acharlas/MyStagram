@@ -1,7 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, apiServerFetch } from "@/lib/api/client";
+import { ApiError, apiServerFetch, apiServerFetchPage } from "@/lib/api/client";
 import SettingsPage from "../../app/(protected)/settings/page";
 
 const getSessionServerMock = vi.hoisted(() => vi.fn());
@@ -30,15 +30,21 @@ vi.mock("@/lib/api/client", async () => {
   return {
     ...actual,
     apiServerFetch: vi.fn(),
+    apiServerFetchPage: vi.fn(),
   };
 });
 
 const mockedApiServerFetch = vi.mocked(apiServerFetch);
+const mockedApiServerFetchPage = vi.mocked(apiServerFetchPage);
 
 (globalThis as unknown as { React: typeof React }).React = React;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockedApiServerFetchPage.mockResolvedValue({
+    data: [],
+    nextOffset: null,
+  });
 });
 
 describe("SettingsPage", () => {

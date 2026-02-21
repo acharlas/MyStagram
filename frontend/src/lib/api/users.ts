@@ -38,6 +38,8 @@ export type FollowStatusResponse = {
   is_following: boolean;
   is_requested: boolean;
   is_private: boolean;
+  is_blocked: boolean;
+  is_blocked_by: boolean;
 };
 
 export type FollowMutationState = "none" | "following" | "requested";
@@ -55,6 +57,13 @@ export type FollowRequestMutationResult = {
   success: boolean;
   status: number;
   detail: string | null;
+};
+
+export type BlockMutationResult = {
+  success: boolean;
+  status: number;
+  detail: string | null;
+  blocked: boolean;
 };
 
 const SEARCH_MIN_LIMIT = 1;
@@ -124,6 +133,25 @@ function buildPostsPath(
   }
 
   const basePath = `${buildProfilePath(username)}/posts`;
+  const query = params.toString();
+  return query.length > 0 ? `${basePath}?${query}` : basePath;
+}
+
+function buildBlockedUsersPath({
+  limit,
+  offset,
+}: {
+  limit?: number;
+  offset?: number;
+} = {}): string {
+  const params = new URLSearchParams();
+  if (typeof limit === "number") {
+    params.set("limit", String(limit));
+  }
+  if (typeof offset === "number" && offset > 0) {
+    params.set("offset", String(offset));
+  }
+  const basePath = "/api/v1/me/blocked-users";
   const query = params.toString();
   return query.length > 0 ? `${basePath}?${query}` : basePath;
 }
@@ -214,6 +242,22 @@ export function fetchUserConnectionPage(
   );
 }
 
+export function fetchBlockedUsersPage(
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  },
+  accessToken?: string,
+): Promise<ApiPage<UserProfilePublic[]>> {
+  return apiServerFetchPage<UserProfilePublic[]>(
+    buildBlockedUsersPath(pagination),
+    {
+      cache: "no-store",
+      headers: buildHeaders(accessToken),
+    },
+  );
+}
+
 export function fetchUserConnections(
   username: string,
   kind: UserConnectionsKind,
@@ -253,6 +297,8 @@ export async function fetchUserFollowStatus(
       is_following: false,
       is_requested: false,
       is_private: false,
+      is_blocked: false,
+      is_blocked_by: false,
     };
   }
 
@@ -267,6 +313,8 @@ export async function fetchUserFollowStatus(
     is_following: result.is_following === true,
     is_requested: result.is_requested === true,
     is_private: result.is_private === true,
+    is_blocked: result.is_blocked === true,
+    is_blocked_by: result.is_blocked_by === true,
   };
 }
 
@@ -274,6 +322,14 @@ function buildFollowUrl(username: string): string {
   const base = process.env.BACKEND_API_URL ?? "http://backend:8000";
   return new URL(
     `/api/v1/users/${encodeURIComponent(username)}/follow`,
+    base,
+  ).toString();
+}
+
+function buildBlockUrl(username: string): string {
+  const base = process.env.BACKEND_API_URL ?? "http://backend:8000";
+  return new URL(
+    `/api/v1/users/${encodeURIComponent(username)}/block`,
     base,
   ).toString();
 }
@@ -378,6 +434,89 @@ export function unfollowUserRequest(
   fetchImpl?: typeof fetch,
 ): Promise<FollowMutationResult> {
   return mutateFollow(username, "DELETE", accessToken, fetchImpl);
+}
+
+async function mutateBlock(
+  username: string,
+  method: "POST" | "DELETE",
+  accessToken?: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<BlockMutationResult> {
+  if (!accessToken) {
+    return {
+      success: false,
+      status: 401,
+      detail: "Not authenticated",
+      blocked: method === "POST",
+    };
+  }
+
+  const url = buildBlockUrl(username);
+
+  try {
+    const response = await fetchImpl(url, {
+      method,
+      headers: {
+        Cookie: `access_token=${accessToken}`,
+      },
+      cache: "no-store",
+    });
+    let detail: string | null = null;
+    let blocked = method === "POST";
+    try {
+      const payload = (await response.json()) as {
+        detail?: string;
+        blocked?: boolean;
+      };
+      if (typeof payload.detail === "string") {
+        detail = payload.detail;
+      }
+      if (typeof payload.blocked === "boolean") {
+        blocked = payload.blocked;
+      }
+    } catch {
+      detail = null;
+    }
+
+    if (!response.ok) {
+      return {
+        success: false,
+        status: response.status,
+        detail,
+        blocked,
+      };
+    }
+
+    return {
+      success: true,
+      status: response.status,
+      detail,
+      blocked,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      status: 500,
+      detail: error instanceof Error ? error.message : "Unknown error",
+      blocked: method === "POST",
+    };
+  }
+}
+
+export function blockUserRequest(
+  username: string,
+  accessToken?: string,
+  fetchImpl?: typeof fetch,
+): Promise<BlockMutationResult> {
+  return mutateBlock(username, "POST", accessToken, fetchImpl);
+}
+
+export function unblockUserRequest(
+  username: string,
+  accessToken?: string,
+  fetchImpl?: typeof fetch,
+): Promise<BlockMutationResult> {
+  return mutateBlock(username, "DELETE", accessToken, fetchImpl);
 }
 
 function buildFollowRequestResolutionUrl(

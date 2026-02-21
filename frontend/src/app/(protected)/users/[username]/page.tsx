@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SettingsIcon } from "@/components/ui/icons";
+import { BlockButton } from "@/components/user/BlockButton";
 import { ConnectionsPanel } from "@/components/user/ConnectionsPanel";
 import { FollowButton } from "@/components/user/FollowButton";
 import { UserPostsGrid } from "@/components/user/UserPostsGrid";
@@ -14,7 +15,12 @@ import {
 } from "@/lib/api/users";
 import { getSessionServer } from "@/lib/auth/session";
 import { buildImageUrl } from "@/lib/image";
-import { followUserAction, unfollowUserAction } from "./actions";
+import {
+  blockUserAction,
+  followUserAction,
+  unblockUserAction,
+  unfollowUserAction,
+} from "./actions";
 
 type UserProfilePageProps = {
   params: Promise<{ username: string }>;
@@ -47,6 +53,8 @@ export default async function UserProfilePage({
     is_following: false,
     is_requested: false,
     is_private: isPrivateAccount,
+    is_blocked: false,
+    is_blocked_by: false,
   };
 
   if (!isOwnProfile && accessToken && viewerUsername) {
@@ -61,7 +69,8 @@ export default async function UserProfilePage({
   }
 
   const canViewPosts =
-    isOwnProfile || !isPrivateAccount || followStatus.is_following;
+    !followStatus.is_blocked &&
+    (isOwnProfile || !isPrivateAccount || followStatus.is_following);
 
   let postsPage: Awaited<ReturnType<typeof fetchUserPostsPage>> = {
     data: [],
@@ -124,21 +133,37 @@ export default async function UserProfilePage({
                 isOwnProfile={isOwnProfile}
               />
               {!isOwnProfile && viewerUsername && accessToken ? (
-                <FollowButton
-                  initiallyFollowing={followStatus.is_following}
-                  initiallyRequested={followStatus.is_requested}
-                  isPrivateAccount={isPrivateAccount}
-                  followAction={followUserAction.bind(null, profile.username)}
-                  unfollowAction={unfollowUserAction.bind(
-                    null,
-                    profile.username,
-                  )}
-                />
+                <div className="flex flex-wrap items-center gap-2">
+                  {!followStatus.is_blocked ? (
+                    <FollowButton
+                      initiallyFollowing={followStatus.is_following}
+                      initiallyRequested={followStatus.is_requested}
+                      isPrivateAccount={isPrivateAccount}
+                      followAction={followUserAction.bind(
+                        null,
+                        profile.username,
+                      )}
+                      unfollowAction={unfollowUserAction.bind(
+                        null,
+                        profile.username,
+                      )}
+                    />
+                  ) : null}
+                  <BlockButton
+                    initiallyBlocked={followStatus.is_blocked}
+                    blockAction={blockUserAction.bind(null, profile.username)}
+                    unblockAction={unblockUserAction.bind(
+                      null,
+                      profile.username,
+                    )}
+                  />
+                </div>
               ) : null}
               {!canViewPosts ? (
                 <p className="ui-surface-input ui-text-muted rounded-2xl border ui-border px-4 py-3 text-sm">
-                  Ce compte est privé. Suivez ce profil pour voir ses
-                  publications.
+                  {followStatus.is_blocked
+                    ? "Vous avez bloque ce compte. Debloquez-le pour revoir ses publications."
+                    : "Ce compte est privé. Suivez ce profil pour voir ses publications."}
                 </p>
               ) : null}
             </div>

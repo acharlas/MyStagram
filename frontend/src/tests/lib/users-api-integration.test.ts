@@ -223,6 +223,8 @@ describe("user API integration behavior", () => {
       is_following: false,
       is_requested: false,
       is_private: false,
+      is_blocked: false,
+      is_blocked_by: false,
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -234,6 +236,8 @@ describe("user API integration behavior", () => {
           is_following: true,
           is_requested: false,
           is_private: true,
+          is_blocked: false,
+          is_blocked_by: false,
         },
         200,
       ),
@@ -246,6 +250,8 @@ describe("user API integration behavior", () => {
       is_following: true,
       is_requested: false,
       is_private: true,
+      is_blocked: false,
+      is_blocked_by: false,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://backend:8000/api/v1/users/demo/follow-status",

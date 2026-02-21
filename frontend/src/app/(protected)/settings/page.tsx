@@ -1,8 +1,9 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ApiError, apiServerFetch } from "@/lib/api/client";
+import { ApiError, type ApiPage, apiServerFetch } from "@/lib/api/client";
+import { fetchBlockedUsersPage, type UserProfilePublic } from "@/lib/api/users";
 import { getSessionServer } from "@/lib/auth/session";
 import { buildImageUrl } from "@/lib/image";
-import { updateProfileAction } from "./actions";
+import { unblockUserAction, updateProfileAction } from "./actions";
 import { CharacterCountField } from "./CharacterCountField";
 import {
   SETTINGS_ALLOWED_AVATAR_MIME_TYPES,
@@ -49,6 +50,33 @@ async function fetchCurrentUser(accessToken?: string) {
   }
 }
 
+async function fetchBlockedUsers(
+  accessToken?: string,
+): Promise<ApiPage<UserProfilePublic[]>> {
+  if (!accessToken) {
+    return {
+      data: [],
+      nextOffset: null,
+    };
+  }
+
+  try {
+    return await fetchBlockedUsersPage({ limit: 50, offset: 0 }, accessToken);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return {
+        data: [],
+        nextOffset: null,
+      };
+    }
+    console.error("Failed to load blocked users", error);
+    return {
+      data: [],
+      nextOffset: null,
+    };
+  }
+}
+
 export default async function SettingsPage({
   searchParams,
 }: SettingsPageProps = {}) {
@@ -68,7 +96,10 @@ export default async function SettingsPage({
   }
 
   const accessToken = session?.accessToken as string | undefined;
-  const profile = await fetchCurrentUser(accessToken);
+  const [profile, blockedUsersPage] = await Promise.all([
+    fetchCurrentUser(accessToken),
+    fetchBlockedUsers(accessToken),
+  ]);
 
   if (!profile) {
     return (
@@ -218,6 +249,47 @@ export default async function SettingsPage({
           </button>
         </div>
       </form>
+
+      <section className="ui-surface-card space-y-4 rounded-3xl border ui-border p-5 backdrop-blur sm:p-6">
+        <header>
+          <h2 className="ui-text-strong text-lg font-semibold tracking-tight">
+            Utilisateurs bloques
+          </h2>
+          <p className="ui-text-muted mt-1 text-sm">
+            Les comptes bloques ne peuvent plus interagir avec vous.
+          </p>
+        </header>
+
+        {blockedUsersPage.data.length === 0 ? (
+          <p className="ui-text-muted text-sm">Aucun utilisateur bloque.</p>
+        ) : (
+          <ul className="space-y-2">
+            {blockedUsersPage.data.map((user) => (
+              <li
+                key={user.id}
+                className="ui-surface-input flex items-center justify-between gap-3 rounded-2xl border ui-border px-3 py-2"
+              >
+                <span className="ui-text-strong truncate text-sm font-medium">
+                  @{user.username}
+                </span>
+                <form action={unblockUserAction}>
+                  <input
+                    type="hidden"
+                    name="blocked_username"
+                    value={user.username}
+                  />
+                  <button
+                    type="submit"
+                    className="ui-focus-ring ui-surface-input ui-text-muted rounded-full border ui-border px-3 py-1 text-xs font-semibold transition hover:border-[color:var(--ui-border-strong)] hover:text-[color:var(--ui-text-strong)] focus:outline-none"
+                  >
+                    Debloquer
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </section>
   );
 }

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api/client";
 import {
+  blockUserRequest,
+  fetchBlockedUsersPage,
   fetchUserConnectionPage,
   fetchUserConnections,
   fetchUserFollowers,
@@ -10,6 +12,7 @@ import {
   fetchUserProfile,
   followUserRequest,
   resolveFollowRequest,
+  unblockUserRequest,
   unfollowUserRequest,
 } from "../../lib/api/users";
 
@@ -300,12 +303,47 @@ describe("fetchUserConnections", () => {
   });
 });
 
+describe("fetchBlockedUsersPage", () => {
+  it("calls blocked-users endpoint with pagination", async () => {
+    const page = {
+      data: [
+        {
+          id: "blocked-1",
+          username: "blocked_user",
+          name: "Blocked User",
+          bio: null,
+          avatar_key: null,
+        },
+      ],
+      nextOffset: null,
+    };
+    apiServerFetchPageMock.mockResolvedValueOnce(page);
+
+    const result = await fetchBlockedUsersPage(
+      { limit: 20, offset: 20 },
+      "token-1",
+    );
+
+    expect(result).toEqual(page);
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/me/blocked-users?limit=20&offset=20",
+      expect.objectContaining({
+        headers: {
+          Cookie: "access_token=token-1",
+        },
+      }),
+    );
+  });
+});
+
 describe("fetchUserFollowStatus", () => {
   it("returns follow status when backend call succeeds", async () => {
     apiServerFetchMock.mockResolvedValueOnce({
       is_following: true,
       is_requested: false,
       is_private: true,
+      is_blocked: true,
+      is_blocked_by: false,
     });
 
     const result = await fetchUserFollowStatus("demo", "token-1");
@@ -314,6 +352,8 @@ describe("fetchUserFollowStatus", () => {
       is_following: true,
       is_requested: false,
       is_private: true,
+      is_blocked: true,
+      is_blocked_by: false,
     });
     expect(apiServerFetchMock).toHaveBeenCalledWith(
       "/api/v1/users/demo/follow-status",
@@ -332,6 +372,8 @@ describe("fetchUserFollowStatus", () => {
       is_following: false,
       is_requested: false,
       is_private: false,
+      is_blocked: false,
+      is_blocked_by: false,
     });
     expect(apiServerFetchMock).not.toHaveBeenCalled();
   });
@@ -429,6 +471,53 @@ describe("unfollowUserRequest", () => {
     expect(result.status).toBe(500);
     expect(result.detail).toBe("network");
     expect(result.state).toBe("none");
+  });
+});
+
+describe("blockUserRequest", () => {
+  it("returns success when backend accepts block", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ detail: "User blocked", blocked: true }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await blockUserRequest("demo", "access-123");
+
+    expect(result).toEqual({
+      success: true,
+      status: 200,
+      detail: "User blocked",
+      blocked: true,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/users/demo/block"),
+      expect.objectContaining({
+        method: "POST",
+        headers: { Cookie: "access_token=access-123" },
+      }),
+    );
+  });
+});
+
+describe("unblockUserRequest", () => {
+  it("returns success when backend accepts unblock", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ detail: "User unblocked", blocked: false }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await unblockUserRequest("demo", "access-123");
+
+    expect(result).toEqual({
+      success: true,
+      status: 200,
+      detail: "User unblocked",
+      blocked: false,
+    });
   });
 });
 
