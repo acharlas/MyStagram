@@ -132,19 +132,24 @@ export default async function ProtectedHomePage() {
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-6xl flex-col gap-5 pb-6 pt-2 xl:flex-row xl:items-start">
-      <div className="flex w-full max-w-2xl flex-1 flex-col gap-5">
-        <HomeFeedList
-          initialPosts={page.data}
-          initialNextOffset={page.nextOffset}
-          pageSize={HOME_FEED_PAGE_SIZE}
-        />
-      </div>
-      <div className="w-full xl:sticky xl:top-5 xl:w-80 xl:shrink-0">
-        <WhoToFollowPanel
-          initialUsers={whoToFollow}
-          followAction={followUserAction}
-        />
+    <section className="mx-auto w-full max-w-[1320px] pb-6 pt-2">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,42rem)_20rem] xl:gap-6">
+        <div className="hidden xl:block" aria-hidden />
+        <div className="flex min-w-0 flex-col gap-5">
+          <HomeFeedList
+            initialPosts={page.data}
+            initialNextOffset={page.nextOffset}
+            pageSize={HOME_FEED_PAGE_SIZE}
+          />
+        </div>
+        <div className="w-full xl:justify-self-end">
+          <div className="xl:sticky xl:top-5">
+            <WhoToFollowPanel
+              initialUsers={whoToFollow}
+              followAction={followUserAction}
+            />
+          </div>
+        </div>
       </div>
     </section>
   );
