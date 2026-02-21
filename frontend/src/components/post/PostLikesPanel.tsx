@@ -232,10 +232,7 @@ export function PostLikesPanel({
       setLikers((current) => mergeLikers(current, page.data));
       setNextOffset(page.nextOffset);
     } catch (loadError) {
-      if (
-        requestScopeRef.current !== requestScope ||
-        isAbortError(loadError)
-      ) {
+      if (requestScopeRef.current !== requestScope || isAbortError(loadError)) {
         return;
       }
       console.error("Failed to load more likes", loadError);

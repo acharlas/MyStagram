@@ -3,15 +3,17 @@ import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 
 import {
+  type AuthorizedUser,
   authorizeWithCredentials,
   fetchUserProfile,
   loginWithCredentials,
   loginWithCredentialsWithClientKey,
-  type AuthorizedUser,
 } from "@/lib/auth/backend-auth";
 import {
-  buildRateLimitClientKeyFromIdentifier,
-} from "@/lib/auth/rate-limit-client";
+  applyAuthorizedUserToJwt,
+  ensureFreshAccessToken,
+} from "@/lib/auth/jwt-lifecycle";
+import { buildRateLimitClientKeyFromIdentifier } from "@/lib/auth/rate-limit-client";
 import {
   clearRefreshCoordinatorStateForTests,
   getRecentRefreshResultCapacityForTests as getRefreshCoordinatorCapacityForTests,
@@ -19,10 +21,6 @@ import {
   getRecentRefreshResultTtlMsForTests as getRefreshCoordinatorTtlMsForTests,
   refreshTokensWithCoordinator,
 } from "@/lib/auth/refresh-coordinator";
-import {
-  applyAuthorizedUserToJwt,
-  ensureFreshAccessToken,
-} from "@/lib/auth/jwt-lifecycle";
 
 const API_BASE_URL = process.env.BACKEND_API_URL ?? "http://backend:8000";
 

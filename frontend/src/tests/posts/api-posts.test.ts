@@ -30,8 +30,8 @@ import {
   fetchSavedPostsPage,
   likePostRequest,
   savePostRequest,
-  unsavePostRequest,
   unlikePostRequest,
+  unsavePostRequest,
   updatePostCaptionRequest,
 } from "../../lib/api/posts";
 
@@ -409,10 +409,12 @@ describe("fetchPostSavedStatus", () => {
   });
 
   it("throws on invalid post id", async () => {
-    await expect(fetchPostSavedStatus("abc", "token123")).rejects.toMatchObject({
-      status: 400,
-      message: "Invalid post id",
-    });
+    await expect(fetchPostSavedStatus("abc", "token123")).rejects.toMatchObject(
+      {
+        status: 400,
+        message: "Invalid post id",
+      },
+    );
   });
 });
 

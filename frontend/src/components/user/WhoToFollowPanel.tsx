@@ -34,7 +34,9 @@ export function WhoToFollowPanel({
     try {
       const result = await followAction(username);
       if (!result.success) {
-        throw new Error(result.error ?? "Impossible de suivre cet utilisateur.");
+        throw new Error(
+          result.error ?? "Impossible de suivre cet utilisateur.",
+        );
       }
       setUsers((current) =>
         current.filter((candidate) => candidate.username !== username),

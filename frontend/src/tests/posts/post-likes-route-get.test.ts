@@ -71,7 +71,9 @@ describe("post likes GET route", () => {
     });
 
     const response = await GET(
-      new NextRequest("http://localhost/api/posts/42/likes?limit=200&offset=-5"),
+      new NextRequest(
+        "http://localhost/api/posts/42/likes?limit=200&offset=-5",
+      ),
       { params: { postId: "42" } },
     );
     const payload = (await response.json()) as {

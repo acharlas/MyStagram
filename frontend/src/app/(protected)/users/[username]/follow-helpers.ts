@@ -1,6 +1,6 @@
 import {
-  followUserRequest,
   type FollowMutationState,
+  followUserRequest,
   unfollowUserRequest,
 } from "@/lib/api/users";
 

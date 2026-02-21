@@ -53,14 +53,14 @@ import {
   DELETE as unlikePostRoute,
 } from "../../app/api/posts/[postId]/likes/route";
 import {
+  DELETE as deletePostRoute,
+  PATCH as patchPostRoute,
+} from "../../app/api/posts/[postId]/route";
+import {
   GET as getSavedStatusRoute,
   POST as savePostRoute,
   DELETE as unsavePostRoute,
 } from "../../app/api/posts/[postId]/saved/route";
-import {
-  DELETE as deletePostRoute,
-  PATCH as patchPostRoute,
-} from "../../app/api/posts/[postId]/route";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -101,9 +101,12 @@ describe("post route handlers", () => {
     getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
     fetchPostSavedStatusMock.mockResolvedValueOnce(true);
 
-    const response = await getSavedStatusRoute(new Request("http://localhost"), {
-      params: { postId: "42" },
-    });
+    const response = await getSavedStatusRoute(
+      new Request("http://localhost"),
+      {
+        params: { postId: "42" },
+      },
+    );
     const payload = (await response.json()) as { is_saved?: boolean };
 
     expect(response.status).toBe(200);
@@ -111,15 +114,21 @@ describe("post route handlers", () => {
   });
 
   it("returns 400 for invalid post id on saved endpoints", async () => {
-    const getResponse = await getSavedStatusRoute(new Request("http://localhost"), {
-      params: { postId: "invalid-id" },
-    });
+    const getResponse = await getSavedStatusRoute(
+      new Request("http://localhost"),
+      {
+        params: { postId: "invalid-id" },
+      },
+    );
     const postResponse = await savePostRoute(new Request("http://localhost"), {
       params: { postId: "invalid-id" },
     });
-    const deleteResponse = await unsavePostRoute(new Request("http://localhost"), {
-      params: { postId: "invalid-id" },
-    });
+    const deleteResponse = await unsavePostRoute(
+      new Request("http://localhost"),
+      {
+        params: { postId: "invalid-id" },
+      },
+    );
 
     expect(getResponse.status).toBe(400);
     expect(postResponse.status).toBe(400);
@@ -131,7 +140,9 @@ describe("post route handlers", () => {
 
   it("propagates backend error status for save endpoint", async () => {
     getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
-    savePostRequestMock.mockRejectedValueOnce(new ApiError(404, "Post not found"));
+    savePostRequestMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
 
     const response = await savePostRoute(new Request("http://localhost"), {
       params: { postId: "42" },

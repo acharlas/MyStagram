@@ -70,12 +70,15 @@ export async function loginWithCredentialsWithClientKey(
 
   const apiBaseUrl = resolveApiBaseUrl(options.apiBaseUrl);
   const fetchImpl = options.fetchImpl ?? fetch;
-  const response = await fetchImpl(buildApiUrl("/api/v1/auth/login", apiBaseUrl), {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ username, password }),
-    cache: "no-store",
-  });
+  const response = await fetchImpl(
+    buildApiUrl("/api/v1/auth/login", apiBaseUrl),
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ username, password }),
+      cache: "no-store",
+    },
+  );
 
   if (!response.ok) {
     throw new Error("Invalid credentials");

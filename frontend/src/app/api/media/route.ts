@@ -33,7 +33,10 @@ type SignedMediaOriginConfig = {
 
 let hasLoggedSignedMediaAllowlistMisconfiguration = false;
 
-function parsePositiveInt(rawValue: string | undefined, fallback: number): number {
+function parsePositiveInt(
+  rawValue: string | undefined,
+  fallback: number,
+): number {
   if (!rawValue) {
     return fallback;
   }
@@ -81,7 +84,10 @@ function resolveSignedMediaOriginConfig(): SignedMediaOriginConfig {
   return { origins, misconfigured };
 }
 
-function isAllowedSignedMediaUrl(rawUrl: string, allowedOrigins: Set<string>): boolean {
+function isAllowedSignedMediaUrl(
+  rawUrl: string,
+  allowedOrigins: Set<string>,
+): boolean {
   try {
     const url = new URL(rawUrl);
     if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -169,7 +175,10 @@ export async function GET(request: NextRequest) {
     let detail = "Unable to load media";
     try {
       const payload = (await backendResponse.json()) as MediaPayload;
-      if (typeof payload.detail === "string" && payload.detail.trim().length > 0) {
+      if (
+        typeof payload.detail === "string" &&
+        payload.detail.trim().length > 0
+      ) {
         detail = payload.detail;
       }
     } catch {

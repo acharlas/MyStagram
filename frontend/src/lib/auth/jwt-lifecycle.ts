@@ -98,7 +98,9 @@ export function applyAuthorizedUserToJwt(
   token.avatarUrl = user.avatarUrl;
   token.accessToken = user.accessToken;
   token.refreshToken = user.refreshToken;
-  token.accessTokenExpires = readAccessTokenExpiryWithFallback(user.accessToken);
+  token.accessTokenExpires = readAccessTokenExpiryWithFallback(
+    user.accessToken,
+  );
   token.error = undefined;
   return token;
 }

@@ -50,9 +50,9 @@ export function SavePostButton({
         if (!response.ok) {
           throw new Error("Request failed");
         }
-        const payload = (await response.json().catch(() => null)) as
-          | { saved?: boolean }
-          | null;
+        const payload = (await response.json().catch(() => null)) as {
+          saved?: boolean;
+        } | null;
         if (typeof payload?.saved === "boolean") {
           setSaved(payload.saved);
         }
@@ -70,7 +70,9 @@ export function SavePostButton({
       disabled={isPending}
       aria-pressed={saved}
       className="ui-focus-ring ui-text-muted rounded-full p-2 transition hover:bg-[color:var(--ui-surface-muted)] hover:text-[color:var(--ui-text-strong)] focus:outline-none disabled:opacity-50"
-      aria-label={saved ? "Retirer des sauvegardes" : "Sauvegarder la publication"}
+      aria-label={
+        saved ? "Retirer des sauvegardes" : "Sauvegarder la publication"
+      }
       title={saved ? "Retirer des sauvegardes" : "Sauvegarder"}
     >
       <SaveIcon filled={saved} />

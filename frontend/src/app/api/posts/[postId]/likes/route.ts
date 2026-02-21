@@ -60,7 +60,11 @@ export async function GET(request: NextRequest, route: RouteParams) {
   const offset = parseOffset(searchParams.get("offset"));
 
   try {
-    const page = await fetchPostLikesPage(postId, { limit, offset }, accessToken);
+    const page = await fetchPostLikesPage(
+      postId,
+      { limit, offset },
+      accessToken,
+    );
     return NextResponse.json(page, { status: 200 });
   } catch (error) {
     if (error instanceof ApiError) {

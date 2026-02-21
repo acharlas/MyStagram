@@ -53,7 +53,9 @@ describe("saved posts route", () => {
     });
 
     const response = await GET(
-      new NextRequest("http://localhost/api/me/saved-posts?limit=999&offset=-4"),
+      new NextRequest(
+        "http://localhost/api/me/saved-posts?limit=999&offset=-4",
+      ),
     );
     const payload = (await response.json()) as {
       data: Array<{ id: number }>;
