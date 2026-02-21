@@ -58,14 +58,14 @@ ALLOW_INSECURE_HTTP_COOKIES=true
 ### `.env.frontend`
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_MINIO_BASE_URL=http://minio:9000/instagram-media
 NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=<random-string>
 RATE_LIMIT_PROXY_SECRET=<shared-random-string>
+MEDIA_SIGNED_URL_ALLOWLIST=http://minio:9000
 ```
 
-Keep `NEXT_PUBLIC_MINIO_BASE_URL` on the Docker-internal hostname (`minio`) when using Next image optimization in containers.
 Set the same `RATE_LIMIT_PROXY_SECRET` value in both `.env.backend` and `.env.frontend` so auth rate limiting can distinguish users behind the frontend container.
+`MEDIA_SIGNED_URL_ALLOWLIST` should contain internal storage origins the frontend server may fetch from (comma-separated); keep this on private Docker network hosts, not public URLs.
 
 The sample values above are safe defaults for local development. Replace the placeholders (`<...>`) with secrets when deploying elsewhere and keep those keys out of version control.
 
@@ -81,9 +81,10 @@ The sample values above are safe defaults for local development. Replace the pla
    docker compose up --build -d
    ```
    - Frontend: http://localhost:3000
-   - A one-shot `minio-init` job auto-creates the media bucket and applies read policy for demo assets.
+   - A one-shot `minio-init` job auto-creates the media bucket.
    - Only frontend is published to host.
    - PostgreSQL, Redis, and MinIO stay on the internal Docker network.
+   - Media files are served through authenticated app routes, not public MinIO URLs.
 
 3. **Optional: boot development mode (hot reload + infra tool ports)**
    ```bash
