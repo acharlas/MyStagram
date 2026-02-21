@@ -28,6 +28,13 @@ export type PostComment = {
   created_at: string;
 };
 
+export type PostLiker = {
+  id: string;
+  username: string;
+  name: string | null;
+  avatar_key: string | null;
+};
+
 export type CreatedComment = PostComment;
 
 function isValidPostId(postId: string): boolean {
@@ -198,6 +205,38 @@ export async function fetchPostCommentsPage(
     }
     console.error("Failed to fetch comment page", error);
     throw new ApiError(500, "Unable to load comments");
+  }
+}
+
+export async function fetchPostLikesPage(
+  postId: string,
+  pagination?: {
+    limit?: number;
+    offset?: number;
+  },
+  accessToken?: string,
+): Promise<ApiPage<PostLiker[]>> {
+  if (!accessToken) {
+    throw new ApiError(401, "Not authenticated");
+  }
+  if (!isValidPostId(postId)) {
+    throw new ApiError(400, "Invalid post id");
+  }
+
+  const path = buildPaginatedPath(`/api/v1/posts/${postId}/likes`, pagination);
+  try {
+    return await apiServerFetchPage<PostLiker[]>(path, {
+      cache: "no-store",
+      headers: {
+        Cookie: `access_token=${accessToken}`,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    console.error("Failed to fetch post likes page", error);
+    throw new ApiError(500, "Unable to load post likes");
   }
 }
 

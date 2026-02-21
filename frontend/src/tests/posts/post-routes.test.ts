@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getSessionServerMock = vi.hoisted(() => vi.fn());
+const fetchPostLikesPageMock = vi.hoisted(() => vi.fn());
 const likePostRequestMock = vi.hoisted(() => vi.fn());
 const unlikePostRequestMock = vi.hoisted(() => vi.fn());
 const createPostCommentMock = vi.hoisted(() => vi.fn());
@@ -28,6 +29,7 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 
 vi.mock("@/lib/api/posts", () => ({
+  fetchPostLikesPage: fetchPostLikesPageMock,
   likePostRequest: likePostRequestMock,
   unlikePostRequest: unlikePostRequestMock,
   createPostComment: createPostCommentMock,

@@ -25,6 +25,7 @@ import {
   fetchPostComments,
   fetchPostCommentsPage,
   fetchPostDetail,
+  fetchPostLikesPage,
   fetchPostSavedStatus,
   fetchSavedPostsPage,
   likePostRequest,
@@ -283,6 +284,72 @@ describe("fetchPostCommentsPage", () => {
 
     await expect(
       fetchPostCommentsPage("42", { limit: 20, offset: 0 }, "token123"),
+    ).rejects.toMatchObject({
+      status: 404,
+      message: "Post not found",
+    });
+  });
+});
+
+describe("fetchPostLikesPage", () => {
+  it("fetches paginated likes with cookie header", async () => {
+    apiServerFetchPageMock.mockResolvedValueOnce({
+      data: [
+        {
+          id: "user-1",
+          username: "user1",
+          name: "User One",
+          avatar_key: "avatars/user-1/default.png",
+        },
+      ],
+      nextOffset: null,
+    });
+
+    const page = await fetchPostLikesPage(
+      "42",
+      { limit: 20, offset: 20 },
+      "token123",
+    );
+
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/posts/42/likes?limit=20&offset=20",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Cookie: "access_token=token123",
+        }),
+      }),
+    );
+    expect(page.data).toHaveLength(1);
+    expect(page.nextOffset).toBeNull();
+  });
+
+  it("throws when no access token is provided", async () => {
+    await expect(
+      fetchPostLikesPage("42", { limit: 20, offset: 0 }),
+    ).rejects.toMatchObject({
+      status: 401,
+      message: "Not authenticated",
+    });
+    expect(apiServerFetchPageMock).not.toHaveBeenCalled();
+  });
+
+  it("throws on invalid post id", async () => {
+    await expect(
+      fetchPostLikesPage("invalid", { limit: 20, offset: 0 }, "token123"),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "Invalid post id",
+    });
+    expect(apiServerFetchPageMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves backend error status", async () => {
+    apiServerFetchPageMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+
+    await expect(
+      fetchPostLikesPage("42", { limit: 20, offset: 0 }, "token123"),
     ).rejects.toMatchObject({
       status: 404,
       message: "Post not found",
