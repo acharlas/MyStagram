@@ -30,6 +30,7 @@ from services import (
     read_upload_file,
 )
 from services.post_policy import (
+    build_author_view_filter,
     require_post_interaction_access,
     require_post_view_access,
 )
@@ -291,9 +292,11 @@ async def list_saved_posts(
         )
 
     post_entity = cast(Any, Post)
+    post_author_column = cast(ColumnElement[str], Post.author_id)
     author_name_column = cast(ColumnElement[str | None], User.name)
     author_username_column = cast(ColumnElement[str | None], User.username)
     author_avatar_key_column = cast(ColumnElement[str | None], User.avatar_key)
+    author_is_private_column = cast(ColumnElement[bool], User.is_private)
     saved_created_at = cast(Any, SavedPost.created_at)
     saved_post_id = cast(Any, SavedPost.post_id)
     query = (
@@ -305,7 +308,14 @@ async def list_saved_posts(
         )
         .join(SavedPost, _eq(SavedPost.post_id, Post.id))
         .join(User, _eq(User.id, Post.author_id))
-        .where(_eq(SavedPost.user_id, viewer_id))
+        .where(
+            _eq(SavedPost.user_id, viewer_id),
+            build_author_view_filter(
+                viewer_id=viewer_id,
+                post_author_column=post_author_column,
+                author_is_private_column=author_is_private_column,
+            ),
+        )
         .order_by(
             _desc(saved_created_at),
             _desc(saved_post_id),
@@ -665,6 +675,12 @@ async def get_saved_post_status(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="User record missing identifier",
         )
+
+    await require_post_view_access(
+        session,
+        viewer_id=viewer_id,
+        post_id=post_id,
+    )
 
     saved_post_entity = cast(Any, SavedPost)
     user_id_column = cast(ColumnElement[str], SavedPost.user_id)

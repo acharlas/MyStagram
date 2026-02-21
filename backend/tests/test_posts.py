@@ -281,6 +281,57 @@ async def test_get_post_is_visible_to_any_authenticated_user(
 
 
 @pytest.mark.asyncio
+async def test_private_post_is_hidden_from_non_followers(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    author_payload = make_user_payload("private_author")
+    follower_payload = make_user_payload("private_follower")
+    outsider_payload = make_user_payload("private_outsider")
+
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    follower_response = await async_client.post("/api/v1/auth/register", json=follower_payload)
+    await async_client.post("/api/v1/auth/register", json=outsider_payload)
+
+    author_id = author_response.json()["id"]
+    follower_id = follower_response.json()["id"]
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": author_payload["username"], "password": author_payload["password"]},
+    )
+    await async_client.patch("/api/v1/me", data={"is_private": "true"})
+
+    post = Post(author_id=author_id, image_key="posts/private.jpg", caption="Private")
+    db_session.add(post)
+    db_session.add(Follow(follower_id=follower_id, followee_id=author_id))
+    await db_session.commit()
+    await db_session.refresh(post)
+
+    await async_client.post("/api/v1/auth/logout")
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": follower_payload["username"], "password": follower_payload["password"]},
+    )
+    visible_response = await async_client.get(f"/api/v1/posts/{post.id}")
+    assert visible_response.status_code == 200
+
+    await async_client.post("/api/v1/auth/logout")
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": outsider_payload["username"], "password": outsider_payload["password"]},
+    )
+    hidden_post = await async_client.get(f"/api/v1/posts/{post.id}")
+    assert hidden_post.status_code == 404
+    hidden_comments = await async_client.get(f"/api/v1/posts/{post.id}/comments")
+    assert hidden_comments.status_code == 404
+    hidden_likes = await async_client.get(f"/api/v1/posts/{post.id}/likes")
+    assert hidden_likes.status_code == 404
+    hidden_saved_status = await async_client.get(f"/api/v1/posts/{post.id}/saved")
+    assert hidden_saved_status.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_get_post_comments_are_visible_to_any_authenticated_user(
     async_client: AsyncClient,
     db_session: AsyncSession,
@@ -913,6 +964,72 @@ async def test_save_unsave_and_list_saved_posts(
     saved_rows = remaining_saved.scalars().all()
     assert len(saved_rows) == 1
     assert saved_rows[0].post_id == post_id_1
+
+
+@pytest.mark.asyncio
+async def test_saved_list_hides_private_posts_when_access_is_lost(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("viewer_private_saved")
+    author_payload = make_user_payload("author_private_saved")
+
+    viewer_response = await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+
+    viewer_id = viewer_response.json()["id"]
+    author_id = author_response.json()["id"]
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": author_payload["username"], "password": author_payload["password"]},
+    )
+    set_private = await async_client.patch("/api/v1/me", data={"is_private": "true"})
+    assert set_private.status_code == 200
+    await async_client.post("/api/v1/auth/logout")
+
+    post = Post(author_id=author_id, image_key="posts/private-saved.jpg", caption="Private saved")
+    db_session.add(post)
+    db_session.add(Follow(follower_id=viewer_id, followee_id=author_id))
+    await db_session.commit()
+    await db_session.refresh(post)
+
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+    save_response = await async_client.post(f"/api/v1/posts/{post.id}/saved")
+    assert save_response.status_code == 200
+    assert save_response.json() == {"detail": "Saved", "saved": True}
+
+    saved_before = await async_client.get("/api/v1/posts/saved")
+    assert saved_before.status_code == 200
+    assert [item["id"] for item in saved_before.json()] == [post.id]
+
+    unfollow_response = await async_client.delete(
+        f"/api/v1/users/{author_payload['username']}/follow"
+    )
+    assert unfollow_response.status_code == 200
+
+    saved_status_after = await async_client.get(f"/api/v1/posts/{post.id}/saved")
+    assert saved_status_after.status_code == 404
+
+    saved_after = await async_client.get("/api/v1/posts/saved")
+    assert saved_after.status_code == 200
+    assert saved_after.json() == []
+
+    saved_rows = (
+        await db_session.execute(
+            select(SavedPost).where(
+                _eq(SavedPost.user_id, viewer_id),
+                _eq(SavedPost.post_id, post.id),
+            )
+        )
+    ).scalars().all()
+    assert len(saved_rows) == 1
 
 
 @pytest.mark.asyncio

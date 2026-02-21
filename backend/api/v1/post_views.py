@@ -220,6 +220,7 @@ async def build_explore_feed(
         .where(
             _ne(post_author_column, viewer_id),
             cast(ColumnElement[bool], follow_followee_column.is_(None)),
+            _eq(User.is_private, False),  # noqa: E712
         )
         .order_by(
             _desc(post_created_at),
