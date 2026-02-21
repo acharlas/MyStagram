@@ -103,7 +103,7 @@ async def test_register_accepts_max_length_canonical_username(async_client):
 @pytest.mark.asyncio
 async def test_register_rejects_too_long_bio(async_client):
     payload = build_payload()
-    payload["bio"] = "x" * 501
+    payload["bio"] = "x" * 121
 
     response = await async_client.post("/api/v1/auth/register", json=payload)
 

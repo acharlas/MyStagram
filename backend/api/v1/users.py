@@ -46,7 +46,7 @@ from services import (
 
 router = APIRouter(tags=["users"])
 MAX_PROFILE_NAME_LENGTH = 80
-MAX_PROFILE_BIO_LENGTH = 500
+MAX_PROFILE_BIO_LENGTH = 120
 logger = logging.getLogger(__name__)
 
 

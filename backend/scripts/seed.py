@@ -212,9 +212,9 @@ EDGE_USERS: Sequence[SeedUser] = [
         username="edge_long_bio",
         email="edge_long_bio@example.com",
         name="Long Bio Profile",
-        bio="L" * 500,
+        bio="L" * 120,
         password="EdgePass!LongBio",
-        purpose="Max-length bio profile (500 chars) to test profile/settings limits.",
+        purpose="Max-length bio profile (120 chars) to test profile/settings limits.",
     ),
     SeedUser(
         username="edge_blank_profile",

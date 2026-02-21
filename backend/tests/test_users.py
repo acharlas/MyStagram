@@ -343,9 +343,9 @@ async def test_update_me_rejects_too_long_bio(async_client: AsyncClient):
         json={"username": payload["username"], "password": payload["password"]},
     )
 
-    response = await async_client.patch("/api/v1/me", data={"bio": "x" * 501})
+    response = await async_client.patch("/api/v1/me", data={"bio": "x" * 121})
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
-    assert "at most 500 characters" in response.json()["detail"]
+    assert "at most 120 characters" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
