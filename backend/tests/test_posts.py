@@ -371,6 +371,196 @@ async def test_get_post_comments_are_visible_to_any_authenticated_user(
 
 
 @pytest.mark.asyncio
+async def test_get_post_likes_are_visible_to_any_authenticated_user(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("viewer_likes")
+    author_payload = make_user_payload("author_likes")
+    liker_one_payload = make_user_payload("liker_one")
+    liker_two_payload = make_user_payload("liker_two")
+    outsider_payload = make_user_payload("outsider_likes")
+
+    await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    author_response = await async_client.post("/api/v1/auth/register", json=author_payload)
+    liker_one_response = await async_client.post(
+        "/api/v1/auth/register",
+        json=liker_one_payload,
+    )
+    liker_two_response = await async_client.post(
+        "/api/v1/auth/register",
+        json=liker_two_payload,
+    )
+    await async_client.post("/api/v1/auth/register", json=outsider_payload)
+
+    author_id = author_response.json()["id"]
+    liker_one_id = liker_one_response.json()["id"]
+    liker_two_id = liker_two_response.json()["id"]
+
+    post = Post(author_id=author_id, image_key="posts/test-likes.jpg", caption="Liked")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+    post_id = post.id
+
+    now = datetime.now(timezone.utc)
+    db_session.add_all(
+        [
+            Like(
+                user_id=liker_one_id,
+                post_id=post_id,
+                created_at=now,
+                updated_at=now,
+            ),
+            Like(
+                user_id=liker_two_id,
+                post_id=post_id,
+                created_at=now + timedelta(seconds=5),
+                updated_at=now + timedelta(seconds=5),
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+
+    response = await async_client.get(f"/api/v1/posts/{post_id}/likes")
+    assert response.status_code == 200
+    assert response.headers.get("x-next-offset") is None
+    payload = response.json()
+    assert [item["id"] for item in payload] == [liker_two_id, liker_one_id]
+
+    first_page = await async_client.get(
+        f"/api/v1/posts/{post_id}/likes",
+        params={"limit": 1, "offset": 0},
+    )
+    assert first_page.status_code == 200
+    assert first_page.headers.get("x-next-offset") == "1"
+    first_payload = first_page.json()
+    assert [item["id"] for item in first_payload] == [liker_two_id]
+
+    second_page = await async_client.get(
+        f"/api/v1/posts/{post_id}/likes",
+        params={"limit": 1, "offset": 1},
+    )
+    assert second_page.status_code == 200
+    assert second_page.headers.get("x-next-offset") is None
+    second_payload = second_page.json()
+    assert [item["id"] for item in second_payload] == [liker_one_id]
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": outsider_payload["username"], "password": outsider_payload["password"]},
+    )
+    visible = await async_client.get(f"/api/v1/posts/{post_id}/likes")
+    assert visible.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_get_post_likes_requires_auth(async_client: AsyncClient):
+    response = await async_client.get("/api/v1/posts/1/likes")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_post_likes_not_found(
+    async_client: AsyncClient,
+):
+    viewer_payload = make_user_payload("viewer_likes_missing")
+    await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+
+    response = await async_client.get("/api/v1/posts/999999/likes")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Post not found"
+
+
+@pytest.mark.asyncio
+async def test_get_post_likes_uses_default_pagination_when_limit_is_omitted(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    viewer_payload = make_user_payload("viewer_likes_default")
+    await async_client.post("/api/v1/auth/register", json=viewer_payload)
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": viewer_payload["username"], "password": viewer_payload["password"]},
+    )
+
+    author = User(
+        id=str(uuid4()),
+        username=f"author_likes_default_{uuid4().hex[:8]}",
+        email=f"author_likes_default_{uuid4().hex[:8]}@example.com",
+        password_hash="hash",
+    )
+    db_session.add(author)
+    await db_session.commit()
+    await db_session.refresh(author)
+
+    post = Post(author_id=author.id, image_key="posts/default-likes.jpg", caption="Paged")
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        pytest.fail("Post id should not be null after refresh")
+    post_id = post.id
+
+    liker_count = 21
+    likers: list[User] = []
+    for index in range(liker_count):
+        suffix = uuid4().hex[:8]
+        liker = User(
+            id=str(uuid4()),
+            username=f"likes_default_{index}_{suffix}",
+            email=f"likes_default_{index}_{suffix}@example.com",
+            password_hash="hash",
+        )
+        likers.append(liker)
+    db_session.add_all(likers)
+    await db_session.commit()
+
+    now = datetime.now(timezone.utc)
+    db_session.add_all(
+        [
+            Like(
+                user_id=liker.id,
+                post_id=post_id,
+                created_at=now + timedelta(seconds=index),
+                updated_at=now + timedelta(seconds=index),
+            )
+            for index, liker in enumerate(likers)
+        ]
+    )
+    await db_session.commit()
+
+    first_page = await async_client.get(f"/api/v1/posts/{post_id}/likes")
+    assert first_page.status_code == 200
+    assert first_page.headers.get("x-next-offset") == "20"
+    first_payload = first_page.json()
+    assert len(first_payload) == 20
+    expected_first_page_ids = [likers[index].id for index in range(liker_count - 1, 0, -1)]
+    assert [item["id"] for item in first_payload] == expected_first_page_ids
+
+    second_page = await async_client.get(
+        f"/api/v1/posts/{post_id}/likes",
+        params={"offset": 20},
+    )
+    assert second_page.status_code == 200
+    assert second_page.headers.get("x-next-offset") is None
+    second_payload = second_page.json()
+    assert len(second_payload) == 1
+    assert second_payload[0]["id"] == likers[0].id
+
+
+@pytest.mark.asyncio
 async def test_create_comment_endpoint(
     async_client: AsyncClient,
     db_session: AsyncSession,

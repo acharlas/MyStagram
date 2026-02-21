@@ -36,6 +36,7 @@ from services.post_policy import (
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 MAX_POST_CAPTION_LENGTH = 2200
+DEFAULT_POST_LIKES_PAGE_SIZE = 20
 
 
 def _normalize_caption(caption: str | None) -> str | None:
@@ -105,6 +106,16 @@ class CommentResponse(BaseModel):
 
 
 CommentResponse.model_rebuild()
+
+
+class PostLikerResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    username: str
+    name: str | None = None
+    avatar_key: str | None = None
+
 
 class CommentCreateRequest(BaseModel):
     text: str = Field(min_length=1, max_length=500)
@@ -735,6 +746,71 @@ async def unsave_post(
         await session.commit()
 
     return {"detail": "Unsaved", "saved": False}
+
+
+@router.get("/{post_id}/likes", response_model=list[PostLikerResponse])
+async def get_post_likes(
+    post_id: int,
+    response: Response,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_POST_LIKES_PAGE_SIZE,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[PostLikerResponse]:
+    viewer_id = current_user.id
+    if viewer_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User record missing identifier",
+        )
+
+    await require_post_view_access(
+        session,
+        viewer_id=viewer_id,
+        post_id=post_id,
+    )
+
+    user_id_column = cast(ColumnElement[str], User.id)
+    username_column = cast(ColumnElement[str], User.username)
+    name_column = cast(ColumnElement[str | None], User.name)
+    avatar_key_column = cast(ColumnElement[str | None], User.avatar_key)
+    like_post_id_column = cast(ColumnElement[int], Like.post_id)
+    like_user_id_column = cast(ColumnElement[str], Like.user_id)
+    like_updated_at_column = cast(Any, Like.updated_at)
+    query = (
+        select(
+            user_id_column,
+            username_column,
+            name_column,
+            avatar_key_column,
+        )
+        .join(Like, _eq(Like.user_id, User.id))
+        .where(_eq(like_post_id_column, post_id))
+        .order_by(
+            _desc(like_updated_at_column),
+            _desc(like_user_id_column),
+        )
+    )
+    if offset > 0:
+        query = query.offset(offset)
+    query = query.limit(limit + 1)
+
+    result = await session.execute(query)
+    rows = result.all()
+    has_more = len(rows) > limit
+    if has_more:
+        rows = rows[:limit]
+    set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
+    return [
+        PostLikerResponse(
+            id=user_id,
+            username=username,
+            name=name,
+            avatar_key=avatar_key,
+        )
+        for user_id, username, name, avatar_key in rows
+    ]
 
 
 @router.post("/{post_id}/likes", status_code=status.HTTP_200_OK)
