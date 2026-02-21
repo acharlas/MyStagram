@@ -16,10 +16,11 @@ from models import DismissedNotification
 
 from .common import desc, eq
 from .ids import is_supported_notification_id
-from .schemas import DismissNotificationResponse
+from .schemas import MAX_NOTIFICATION_ID_LENGTH, DismissNotificationResponse
 
 MAX_DISMISSED_NOTIFICATIONS = 500
 PRUNE_BATCH_SIZE = 100
+MAX_BULK_DISMISS_NOTIFICATIONS = 64
 logger = logging.getLogger(__name__)
 
 
@@ -177,6 +178,10 @@ async def dismiss_notification_for_user(
     normalized_notification_id = notification_id.strip()
     if not normalized_notification_id:
         raise ValueError("notification_id must not be empty")
+    if len(normalized_notification_id) > MAX_NOTIFICATION_ID_LENGTH:
+        raise ValueError(
+            f"notification_id must be at most {MAX_NOTIFICATION_ID_LENGTH} characters"
+        )
     if not is_supported_notification_id(normalized_notification_id):
         raise ValueError("notification_id format is invalid")
 
@@ -229,3 +234,78 @@ async def dismiss_notification_for_user(
         notification_id=dismissed.notification_id,
         dismissed_at=dismissed.dismissed_at,
     )
+
+
+async def dismiss_notifications_for_user(
+    session: AsyncSession,
+    user_id: str,
+    *,
+    notification_ids: list[str],
+) -> int:
+    if len(notification_ids) == 0:
+        raise ValueError("notification_ids must not be empty")
+    if len(notification_ids) > MAX_BULK_DISMISS_NOTIFICATIONS:
+        raise ValueError(
+            f"notification_ids must contain at most {MAX_BULK_DISMISS_NOTIFICATIONS} items"
+        )
+
+    seen_ids: set[str] = set()
+    normalized_ids: list[str] = []
+    for raw_notification_id in notification_ids:
+        normalized_notification_id = raw_notification_id.strip()
+        if not normalized_notification_id:
+            raise ValueError("notification_id must not be empty")
+        if len(normalized_notification_id) > MAX_NOTIFICATION_ID_LENGTH:
+            raise ValueError(
+                f"notification_id must be at most {MAX_NOTIFICATION_ID_LENGTH} characters"
+            )
+        if not is_supported_notification_id(normalized_notification_id):
+            raise ValueError("notification_id format is invalid")
+        if normalized_notification_id in seen_ids:
+            continue
+        seen_ids.add(normalized_notification_id)
+        normalized_ids.append(normalized_notification_id)
+
+    existing_notification_id_column = cast(
+        ColumnElement[str], DismissedNotification.notification_id
+    )
+    existing_result = await session.execute(
+        select(existing_notification_id_column).where(
+            eq(DismissedNotification.user_id, user_id),
+            cast(ColumnElement[str], DismissedNotification.notification_id).in_(normalized_ids),
+        )
+    )
+    existing_notification_ids = {row[0] for row in existing_result.all()}
+    missing_notification_ids = [
+        notification_id
+        for notification_id in normalized_ids
+        if notification_id not in existing_notification_ids
+    ]
+
+    if missing_notification_ids:
+        session.add_all(
+            [
+                DismissedNotification(
+                    user_id=user_id,
+                    notification_id=notification_id,
+                )
+                for notification_id in missing_notification_ids
+            ]
+        )
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            await session.rollback()
+            if not is_unique_violation(exc):
+                raise
+            # Concurrent inserts are idempotent; retry through the single-item path.
+            for notification_id in missing_notification_ids:
+                await dismiss_notification_for_user(
+                    session,
+                    user_id,
+                    notification_id=notification_id,
+                )
+        else:
+            await _run_best_effort_prune(session, user_id)
+
+    return len(normalized_ids)

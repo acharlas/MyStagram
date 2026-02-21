@@ -11,10 +11,13 @@ from api.deps import get_current_user, get_db
 from models import User
 from services.notifications.dismissals import (
     MAX_DISMISSED_NOTIFICATIONS,
+    dismiss_notifications_for_user,
     dismiss_notification_for_user,
     list_dismissed_notification_ids,
 )
 from services.notifications.schemas import (
+    DismissNotificationsBulkRequest,
+    DismissNotificationsBulkResponse,
     DismissNotificationRequest,
     DismissNotificationResponse,
     DismissedNotificationListResponse,
@@ -90,3 +93,25 @@ async def dismiss_notification(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
+
+
+@router.post("/dismissed/bulk", response_model=DismissNotificationsBulkResponse)
+async def dismiss_notifications_bulk(
+    payload: DismissNotificationsBulkRequest,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DismissNotificationsBulkResponse:
+    user_id = _require_user_id(current_user)
+    try:
+        processed_count = await dismiss_notifications_for_user(
+            session,
+            user_id,
+            notification_ids=payload.notification_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    return DismissNotificationsBulkResponse(processed_count=processed_count)

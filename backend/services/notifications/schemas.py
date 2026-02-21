@@ -3,18 +3,32 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
+MAX_NOTIFICATION_ID_LENGTH = 191
+NotificationId = Annotated[
+    str,
+    Field(min_length=1, max_length=MAX_NOTIFICATION_ID_LENGTH),
+]
+
 
 class DismissNotificationRequest(BaseModel):
-    notification_id: str = Field(min_length=1, max_length=191)
+    notification_id: NotificationId
 
 
 class DismissNotificationResponse(BaseModel):
     notification_id: str
     dismissed_at: datetime
+
+
+class DismissNotificationsBulkRequest(BaseModel):
+    notification_ids: list[NotificationId] = Field(min_length=1)
+
+
+class DismissNotificationsBulkResponse(BaseModel):
+    processed_count: int
 
 
 class DismissedNotificationListResponse(BaseModel):

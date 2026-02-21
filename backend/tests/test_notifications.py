@@ -70,6 +70,127 @@ async def test_notification_dismiss_requires_auth(async_client: AsyncClient) -> 
 
 
 @pytest.mark.asyncio
+async def test_notification_bulk_dismiss_requires_auth(async_client: AsyncClient) -> None:
+    response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={"notification_ids": ["comment-1-1", "comment-1-2"]},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_bulk_dismiss_notifications_persists_trimmed_unique_identifiers(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    payload = make_user_payload("notif_bulk")
+    await register_and_login(async_client, payload)
+
+    response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={
+            "notification_ids": [
+                "comment-42-7",
+                " comment-42-8 ",
+                "comment-42-7",
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"processed_count": 2}
+
+    listed = await async_client.get("/api/v1/notifications/dismissed")
+    assert listed.status_code == 200
+    assert set(listed.json()["notification_ids"]) == {"comment-42-7", "comment-42-8"}
+
+    result = await db_session.execute(select(DismissedNotification))
+    stored_ids = {
+        item.notification_id
+        for item in result.scalars().all()
+        if item.notification_id.startswith("comment-42-")
+    }
+    assert stored_ids == {"comment-42-7", "comment-42-8"}
+
+
+@pytest.mark.asyncio
+async def test_bulk_dismiss_notifications_rejects_invalid_payloads(
+    async_client: AsyncClient,
+) -> None:
+    payload = make_user_payload("notif_bulk_invalid")
+    await register_and_login(async_client, payload)
+
+    empty_response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={"notification_ids": []},
+    )
+    assert empty_response.status_code == 422
+
+    invalid_id_response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={"notification_ids": ["invalid-id"]},
+    )
+    assert invalid_id_response.status_code == 422
+    assert invalid_id_response.json()["detail"] == "notification_id format is invalid"
+
+    too_many_ids = [
+        f"comment-10-{index + 1}"
+        for index in range(notification_dismissals.MAX_BULK_DISMISS_NOTIFICATIONS + 1)
+    ]
+    too_many_response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={"notification_ids": too_many_ids},
+    )
+    assert too_many_response.status_code == 422
+    assert "at most" in too_many_response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_bulk_dismiss_notifications_rejects_overlong_identifier(
+    async_client: AsyncClient,
+) -> None:
+    payload = make_user_payload("notif_bulk_overlong")
+    await register_and_login(async_client, payload)
+
+    overlong_notification_id = "comment-1-" + ("9" * 182)
+    response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={"notification_ids": [overlong_notification_id]},
+    )
+    assert response.status_code == 422
+
+    listed = await async_client.get("/api/v1/notifications/dismissed")
+    assert listed.status_code == 200
+    assert listed.json()["notification_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_bulk_dismiss_notifications_with_invalid_item_is_atomic(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    payload = make_user_payload("notif_bulk_atomic")
+    await register_and_login(async_client, payload)
+
+    response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={"notification_ids": ["comment-11-1", "invalid-id"]},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "notification_id format is invalid"
+
+    listed = await async_client.get("/api/v1/notifications/dismissed")
+    assert listed.status_code == 200
+    assert listed.json()["notification_ids"] == []
+
+    user = await get_user_by_username(db_session, payload["username"])
+    stored = await db_session.execute(
+        select(DismissedNotification).where(_eq(DismissedNotification.user_id, user.id))
+    )
+    assert stored.scalars().all() == []
+
+
+@pytest.mark.asyncio
 async def test_dismiss_notification_is_persisted_and_idempotent(
     async_client: AsyncClient,
     db_session: AsyncSession,
