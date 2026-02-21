@@ -24,7 +24,7 @@ export default function ProtectedError({ error, reset }: ProtectedErrorProps) {
           secondes.
         </p>
         {digest ? (
-          <p className="ui-text-subtle mt-2 text-xs">Reference: {digest}</p>
+          <p className="ui-text-subtle mt-2 text-xs">Référence: {digest}</p>
         ) : null}
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <button
@@ -36,7 +36,7 @@ export default function ProtectedError({ error, reset }: ProtectedErrorProps) {
           </button>
           <Link
             href="/"
-            className="ui-focus-ring ui-text-muted inline-flex rounded-full border ui-border px-4 py-2 text-sm font-semibold transition hover:text-[color:var(--ui-text-strong)]"
+            className="ui-focus-ring ui-text-muted inline-flex rounded-full border ui-border px-4 py-2 text-sm font-semibold transition hover:border-[color:var(--ui-border-strong)] hover:text-[color:var(--ui-text-strong)]"
           >
             Retour au fil
           </Link>

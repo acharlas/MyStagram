@@ -39,7 +39,7 @@ export function MobileNavDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-40 px-3 pb-20 pt-4 lg:hidden">
+    <div className="fixed inset-0 z-40 px-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] pt-[calc(0.75rem+env(safe-area-inset-top))] lg:hidden">
       <button
         type="button"
         onClick={onClose}
@@ -53,7 +53,7 @@ export function MobileNavDialog({
         aria-modal="true"
         aria-labelledby={dialogId}
         tabIndex={-1}
-        className={`ui-surface-card-strong relative z-10 mx-auto flex h-full w-full max-w-lg flex-col rounded-2xl border ui-border p-3 shadow-2xl ${panelClassName ?? ""}`}
+        className={`ui-surface-card-strong relative z-10 mx-auto flex h-full w-full max-w-lg flex-col rounded-3xl border ui-border p-3 shadow-2xl ${panelClassName ?? ""}`}
       >
         <div className="mb-2 flex items-center justify-between">
           <h2 id={dialogId} className="ui-text-strong text-sm font-semibold">
@@ -70,7 +70,7 @@ export function MobileNavDialog({
         </div>
 
         <div
-          className={`min-h-0 flex-1 overflow-y-auto ${bodyClassName ?? ""}`}
+          className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${bodyClassName ?? ""}`}
         >
           {children}
         </div>

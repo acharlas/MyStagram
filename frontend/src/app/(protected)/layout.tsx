@@ -57,7 +57,10 @@ export default async function ProtectedLayout({
   return (
     <div className="min-h-screen bg-transparent ui-text-strong lg:flex">
       <NavBar username={username} avatarKey={avatarKey} />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 pt-4 sm:px-6 lg:max-w-none lg:px-8 lg:pb-10 lg:pt-8 xl:px-10">
+      <main
+        id="main-content"
+        className="mx-auto w-full max-w-6xl flex-1 px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 lg:max-w-none lg:px-8 lg:pb-10 lg:pt-8 xl:px-10"
+      >
         {children}
       </main>
     </div>

@@ -10,7 +10,10 @@ type AuthShellProps = {
 
 export function AuthShell({ title, subtitle, children }: AuthShellProps) {
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-10">
+    <main
+      id="main-content"
+      className="relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-10"
+    >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(47,156,244,0.2),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(70,168,247,0.12),transparent_35%)]" />
 
       <section className="ui-surface-card relative z-10 w-full max-w-md space-y-6 rounded-3xl border ui-border p-8 shadow-[0_30px_60px_-40px_rgba(47,156,244,0.55)] backdrop-blur">

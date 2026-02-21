@@ -588,7 +588,15 @@ export function NavBar({ username, avatarKey }: NavBarProps) {
         </div>
       </MobileNavDialog>
 
-      <nav className="ui-surface-nav fixed inset-x-0 bottom-0 z-30 border-t ui-border backdrop-blur lg:hidden">
+      <nav
+        aria-label="Navigation principale"
+        className="ui-surface-nav fixed inset-x-0 bottom-0 z-30 border-t ui-border shadow-[0_-14px_30px_-26px_rgba(4,9,18,0.95)] backdrop-blur lg:hidden"
+        style={{
+          paddingBottom: "env(safe-area-inset-bottom)",
+          paddingLeft: "env(safe-area-inset-left)",
+          paddingRight: "env(safe-area-inset-right)",
+        }}
+      >
         <ul className="mx-auto grid w-full max-w-lg grid-cols-5">
           <li>
             <Link
@@ -650,7 +658,7 @@ export function NavBar({ username, avatarKey }: NavBarProps) {
               <BellIcon className="h-5 w-5" />
               <span>Notification</span>
               {inboxTotalCount > 0 ? (
-                <span className="ui-danger-badge absolute right-4 top-1.5 rounded-full px-1 py-0.5 text-[10px] font-semibold leading-none">
+                <span className="ui-danger-badge absolute right-4 top-1.5 min-w-4 rounded-full px-1 py-0.5 text-center text-[10px] font-semibold leading-none">
                   {inboxTotalCount}
                 </span>
               ) : null}

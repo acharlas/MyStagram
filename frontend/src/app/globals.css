@@ -4,6 +4,10 @@
   --background: #0c1119;
   --foreground: #eef3fa;
   --accent: #4fa3ff;
+  --safe-area-top: env(safe-area-inset-top);
+  --safe-area-right: env(safe-area-inset-right);
+  --safe-area-bottom: env(safe-area-inset-bottom);
+  --safe-area-left: env(safe-area-inset-left);
   --ui-accent: #4fa3ff;
   --ui-accent-hover: #74b8ff;
   --ui-accent-soft: rgb(79 163 255 / 16%);
@@ -59,6 +63,7 @@ body {
     ), linear-gradient(180deg, #0c121c 0%, #101824 100%);
   color: var(--foreground);
   font-family: var(--font-sora), "Avenir Next", "Segoe UI", sans-serif;
+  -webkit-tap-highlight-color: transparent;
 }
 
 ::selection {
@@ -162,10 +167,48 @@ body {
   color: var(--ui-danger-text);
 }
 
+.ui-error-text {
+  color: var(--ui-danger-text);
+}
+
 .ui-nav-icon {
   color: var(--ui-nav-icon);
 }
 
 .ui-nav-icon-active {
   color: var(--ui-nav-icon-active);
+}
+
+.ui-skip-link {
+  position: fixed;
+  left: 0.75rem;
+  top: calc(0.5rem + var(--safe-area-top));
+  z-index: 60;
+  transform: translateY(-140%);
+  border: 1px solid var(--ui-border-strong);
+  background: var(--ui-surface-card-strong);
+  color: var(--ui-text-strong);
+  border-radius: 9999px;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  box-shadow: 0 10px 25px -18px rgb(8 112 184 / 75%);
+  transition: transform 180ms ease;
+}
+
+.ui-skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
+  }
 }
