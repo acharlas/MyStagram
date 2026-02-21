@@ -41,7 +41,10 @@ def _run_start_script(
             fake_bin / "uv",
             "#!/bin/sh\n"
             'echo "uv $*" >> "$FAKE_STARTUP_LOG"\n'
-            'if [ "${FAKE_UV_SHOULD_FAIL:-0}" = "1" ]; then\n'
+            'if [ "${FAKE_UV_SHOULD_FAIL:-0}" = "1" ] \\\n'
+            '  && [ "$1" = "run" ] \\\n'
+            '  && [ "$2" = "python" ] \\\n'
+            '  && [ "$3" = "scripts/prune_dismissed_notifications.py" ]; then\n'
             "  exit 1\n"
             "fi\n"
             "exit 0\n",
@@ -60,6 +63,7 @@ def _run_start_script(
                 "FAKE_STARTUP_LOG": str(log_path),
                 "FAKE_UV_SHOULD_FAIL": "1" if uv_should_fail else "0",
                 "DISMISSED_PRUNE_ON_STARTUP": prune_on_startup,
+                "SYNC_DEFAULT_AVATARS_ON_STARTUP": "false",
                 "UVICORN_RELOAD": "false",
             }
         )
