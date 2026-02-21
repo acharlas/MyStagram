@@ -5,12 +5,13 @@ from __future__ import annotations
 from typing import Any, cast
 
 from fastapi import HTTPException, status
-from sqlalchemy import exists, or_, select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from models import Follow, Post, User
 from services.account_privacy import can_view_account_content
+from services.account_blocks import build_not_blocked_either_direction_filter
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -32,10 +33,16 @@ def build_author_view_filter(
     )
     return cast(
         ColumnElement[bool],
-        or_(
-            _eq(post_author_column, viewer_id),
-            cast(ColumnElement[bool], author_is_private_column.is_(False)),
-            follow_exists,
+        and_(
+            build_not_blocked_either_direction_filter(
+                viewer_id=viewer_id,
+                candidate_user_id_column=post_author_column,
+            ),
+            or_(
+                _eq(post_author_column, viewer_id),
+                cast(ColumnElement[bool], author_is_private_column.is_(False)),
+                follow_exists,
+            ),
         ),
     )
 
@@ -106,6 +113,10 @@ async def require_post_interaction_access(
         select(post_author_column)
         .where(
             _eq(Post.id, post_id),
+            build_not_blocked_either_direction_filter(
+                viewer_id=viewer_id,
+                candidate_user_id_column=post_author_column,
+            ),
             or_(_eq(post_author_column, viewer_id), follow_exists),
         )
         .limit(1)

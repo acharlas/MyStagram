@@ -12,6 +12,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.sql import ColumnElement
 
 from models import Comment, DismissedNotification, FollowRequest, Like, Post, User
+from services.account_blocks import build_not_blocked_either_direction_filter
 
 from .common import desc, eq
 from .ids import (
@@ -80,6 +81,10 @@ def _build_comment_events_visible_subquery(
         .where(
             eq(Post.author_id, user_id),
             comment_author_id_column != user_id,
+            build_not_blocked_either_direction_filter(
+                viewer_id=user_id,
+                candidate_user_id_column=comment_author_id_column,
+            ),
             dismissed_comment_id_column.is_(None),
         )
         .order_by(
@@ -154,6 +159,10 @@ def _build_like_events_visible_subquery(
         .where(
             eq(Post.author_id, user_id),
             like_user_id_column != user_id,
+            build_not_blocked_either_direction_filter(
+                viewer_id=user_id,
+                candidate_user_id_column=like_user_id_column,
+            ),
             or_(
                 dismissed_like_exact_at_column.is_(None),
                 dismissed_like_exact_at_column < like_event_time_column,
@@ -359,6 +368,12 @@ async def _load_follow_stream_items(
             ),
         )
         .where(eq(FollowRequest.target_id, user_id))
+        .where(
+            build_not_blocked_either_direction_filter(
+                viewer_id=user_id,
+                candidate_user_id_column=follow_requester_id_column,
+            )
+        )
         .where(
             or_(
                 dismissed_follow_at_column.is_(None),

@@ -9,6 +9,7 @@ from .post import Post
 from .refresh_token import RefreshToken
 from .saved_post import SavedPost
 from .user import User
+from .user_block import UserBlock
 
 __all__ = [
     "User",
@@ -20,4 +21,5 @@ __all__ = [
     "DismissedNotification",
     "RefreshToken",
     "SavedPost",
+    "UserBlock",
 ]

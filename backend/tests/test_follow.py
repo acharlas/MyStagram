@@ -8,7 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Follow, FollowRequest
+from models import Follow, FollowRequest, UserBlock
 
 
 def make_user_payload(prefix: str) -> dict[str, str | None]:
@@ -359,6 +359,185 @@ async def test_private_follow_request_can_be_approved(async_client: AsyncClient)
     assert status_response.status_code == 200
     assert status_response.json()["is_following"] is True
     assert status_response.json()["is_requested"] is False
+
+
+@pytest.mark.asyncio
+async def test_block_clears_follow_edges_and_prevents_follow(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    alice = make_user_payload("alice")
+    bob = make_user_payload("bob")
+
+    await async_client.post("/api/v1/auth/register", json=alice)
+    await async_client.post("/api/v1/auth/register", json=bob)
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": alice["username"], "password": alice["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{bob['username']}/follow")
+    await async_client.post("/api/v1/auth/logout")
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": bob["username"], "password": bob["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{alice['username']}/follow")
+    await async_client.post("/api/v1/auth/logout")
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": alice["username"], "password": alice["password"]},
+    )
+    block_response = await async_client.post(f"/api/v1/users/{bob['username']}/block")
+    assert block_response.status_code == 200
+    assert block_response.json()["blocked"] is True
+
+    follows = (await db_session.execute(select(Follow))).scalars().all()
+    follow_requests = (await db_session.execute(select(FollowRequest))).scalars().all()
+    blocks = (await db_session.execute(select(UserBlock))).scalars().all()
+    assert follows == []
+    assert follow_requests == []
+    assert len(blocks) == 1
+
+    status_as_blocker = await async_client.get(
+        f"/api/v1/users/{bob['username']}/follow-status"
+    )
+    assert status_as_blocker.status_code == 200
+    assert status_as_blocker.json()["is_blocked"] is True
+    assert status_as_blocker.json()["is_blocked_by"] is False
+
+    await async_client.post("/api/v1/auth/logout")
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": bob["username"], "password": bob["password"]},
+    )
+
+    status_as_blocked = await async_client.get(
+        f"/api/v1/users/{alice['username']}/follow-status"
+    )
+    assert status_as_blocked.status_code == 404
+
+    follow_response = await async_client.post(f"/api/v1/users/{alice['username']}/follow")
+    assert follow_response.status_code == 404
+
+    unfollow_response = await async_client.delete(
+        f"/api/v1/users/{alice['username']}/follow"
+    )
+    assert unfollow_response.status_code == 404
+
+    await async_client.post("/api/v1/auth/logout")
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": alice["username"], "password": alice["password"]},
+    )
+    blocker_unfollow_response = await async_client.delete(
+        f"/api/v1/users/{bob['username']}/follow"
+    )
+    assert blocker_unfollow_response.status_code == 403
+
+    unblock_response = await async_client.delete(
+        f"/api/v1/users/{bob['username']}/block"
+    )
+    assert unblock_response.status_code == 200
+    assert unblock_response.json()["blocked"] is False
+
+    await async_client.post("/api/v1/auth/logout")
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": bob["username"], "password": bob["password"]},
+    )
+    follow_after_unblock = await async_client.post(
+        f"/api/v1/users/{alice['username']}/follow"
+    )
+    assert follow_after_unblock.status_code == 200
+    assert follow_after_unblock.json()["state"] == "following"
+
+
+@pytest.mark.asyncio
+async def test_block_hides_profiles_from_search_and_lists_blocked_users(
+    async_client: AsyncClient,
+):
+    owner = make_user_payload("owner")
+    blocked = make_user_payload("blocked")
+    blocked_two = make_user_payload("blocked2")
+
+    await async_client.post("/api/v1/auth/register", json=owner)
+    await async_client.post("/api/v1/auth/register", json=blocked)
+    await async_client.post("/api/v1/auth/register", json=blocked_two)
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": owner["username"], "password": owner["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{blocked['username']}/block")
+    await async_client.post(f"/api/v1/users/{blocked_two['username']}/block")
+
+    blocked_search = await async_client.get(
+        "/api/v1/users/search",
+        params={"q": "blocked", "limit": 10},
+    )
+    assert blocked_search.status_code == 200
+    blocked_usernames = {item["username"] for item in blocked_search.json()}
+    assert blocked["username"] not in blocked_usernames
+    assert blocked_two["username"] not in blocked_usernames
+
+    blocked_users_page_one = await async_client.get(
+        "/api/v1/me/blocked-users",
+        params={"limit": 1, "offset": 0},
+    )
+    assert blocked_users_page_one.status_code == 200
+    assert len(blocked_users_page_one.json()) == 1
+    assert blocked_users_page_one.headers.get("x-next-offset") == "1"
+
+    blocked_users_page_two = await async_client.get(
+        "/api/v1/me/blocked-users",
+        params={"limit": 1, "offset": 1},
+    )
+    assert blocked_users_page_two.status_code == 200
+    assert len(blocked_users_page_two.json()) == 1
+    assert blocked_users_page_two.headers.get("x-next-offset") is None
+
+    await async_client.post("/api/v1/auth/logout")
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": blocked["username"], "password": blocked["password"]},
+    )
+    profile_response = await async_client.get(f"/api/v1/users/{owner['username']}")
+    assert profile_response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_block_endpoints_hide_blocker_from_blocked_user(
+    async_client: AsyncClient,
+):
+    blocker = make_user_payload("blocker")
+    blocked = make_user_payload("blocked_actor")
+
+    await async_client.post("/api/v1/auth/register", json=blocker)
+    await async_client.post("/api/v1/auth/register", json=blocked)
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": blocker["username"], "password": blocker["password"]},
+    )
+    apply_block = await async_client.post(f"/api/v1/users/{blocked['username']}/block")
+    assert apply_block.status_code == 200
+
+    await async_client.post("/api/v1/auth/logout")
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": blocked["username"], "password": blocked["password"]},
+    )
+
+    block_response = await async_client.post(f"/api/v1/users/{blocker['username']}/block")
+    assert block_response.status_code == 404
+
+    unblock_response = await async_client.delete(
+        f"/api/v1/users/{blocker['username']}/block"
+    )
+    assert unblock_response.status_code == 404
 
 
 @pytest.mark.asyncio

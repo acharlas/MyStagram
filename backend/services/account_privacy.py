@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from models import Follow, FollowRequest, User
+from services.account_blocks import are_users_blocked
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -57,6 +58,12 @@ async def can_view_account_content(
 
     if viewer_id == target_id:
         return True
+    if await are_users_blocked(
+        session,
+        user_id=viewer_id,
+        other_user_id=target_id,
+    ):
+        return False
     if not account.is_private:
         return True
     return await is_following(
