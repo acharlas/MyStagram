@@ -5,6 +5,28 @@ export function resolveProfileHref(href: string, username?: string): string {
   return href;
 }
 
+export function resolveOwnRequestsHref(username?: string): string {
+  if (typeof username === "string" && username.trim().length > 0) {
+    return `/users/${encodeURIComponent(username)}?panel=requests`;
+  }
+  return "/login";
+}
+
+type SearchParamsLike = {
+  toString(): string;
+};
+
+export function buildPathWithoutSearchParam(
+  pathname: string,
+  searchParams: SearchParamsLike,
+  paramKey: string,
+): string {
+  const params = new URLSearchParams(searchParams.toString());
+  params.delete(paramKey);
+  const query = params.toString();
+  return query.length > 0 ? `${pathname}?${query}` : pathname;
+}
+
 export function isPathActive(pathname: string, href: string): boolean {
   if (href === "/") {
     return pathname === "/";

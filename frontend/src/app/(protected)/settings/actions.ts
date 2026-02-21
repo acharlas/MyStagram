@@ -2,9 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
-
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { getSessionServer } from "@/lib/auth/session";
 
 import {
   SETTINGS_ALLOWED_AVATAR_MIME_TYPES,
@@ -28,7 +26,7 @@ function redirectToSettingsError(message: string): never {
 }
 
 export async function updateProfileAction(formData: FormData): Promise<void> {
-  const session = await getServerSession(authOptions);
+  const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
   const sessionUser = session?.user as { username?: string } | undefined;
   const sessionUsername =
@@ -46,9 +44,11 @@ export async function updateProfileAction(formData: FormData): Promise<void> {
   const nameRaw = formData.get("name");
   const bioRaw = formData.get("bio");
   const avatarRaw = formData.get("avatar");
+  const isPrivateRaw = formData.get("is_private");
 
   const name = typeof nameRaw === "string" ? nameRaw.trim() : "";
   const bio = typeof bioRaw === "string" ? bioRaw.trim() : "";
+  const isPrivate = isPrivateRaw === "true";
 
   if (name.length > SETTINGS_DISPLAY_NAME_MAX_LENGTH) {
     redirectToSettingsError(
@@ -80,6 +80,7 @@ export async function updateProfileAction(formData: FormData): Promise<void> {
   const payload = new FormData();
   payload.append("name", name);
   payload.append("bio", bio);
+  payload.append("is_private", isPrivate ? "true" : "false");
   if (avatarFile) {
     payload.append("avatar", avatarFile, avatarFile.name);
   }
@@ -118,4 +119,56 @@ export async function updateProfileAction(formData: FormData): Promise<void> {
   }
 
   return;
+}
+
+function parseBlockedUsername(formData: FormData): string | null {
+  const raw = formData.get("blocked_username");
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export async function unblockUserAction(formData: FormData): Promise<void> {
+  const session = await getSessionServer();
+  const accessToken = session?.accessToken as string | undefined;
+  if (!accessToken) {
+    redirectToSettingsError("Session expirée. Veuillez vous reconnecter.");
+  }
+
+  const blockedUsername = parseBlockedUsername(formData);
+  if (!blockedUsername) {
+    redirectToSettingsError("Nom d'utilisateur invalide.");
+  }
+
+  const response = await fetch(
+    new URL(
+      `/api/v1/users/${encodeURIComponent(blockedUsername)}/block`,
+      BACKEND_BASE_URL,
+    ).toString(),
+    {
+      method: "DELETE",
+      cache: "no-store",
+      headers: {
+        Cookie: `access_token=${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    let message = SETTINGS_GENERIC_ERROR;
+    try {
+      const json = (await response.json()) as { detail?: string };
+      if (typeof json?.detail === "string" && json.detail.trim().length > 0) {
+        message = json.detail;
+      }
+    } catch {
+      // keep generic message
+    }
+    redirectToSettingsError(message);
+  }
+
+  revalidatePath("/settings");
+  revalidatePath(`/users/${blockedUsername}`);
 }

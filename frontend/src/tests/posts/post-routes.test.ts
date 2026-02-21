@@ -1,9 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getSessionServerMock = vi.hoisted(() => vi.fn());
+const fetchPostLikesPageMock = vi.hoisted(() => vi.fn());
 const likePostRequestMock = vi.hoisted(() => vi.fn());
 const unlikePostRequestMock = vi.hoisted(() => vi.fn());
 const createPostCommentMock = vi.hoisted(() => vi.fn());
+const deletePostCommentRequestMock = vi.hoisted(() => vi.fn());
+const deletePostRequestMock = vi.hoisted(() => vi.fn());
+const updatePostCaptionRequestMock = vi.hoisted(() => vi.fn());
+const fetchPostSavedStatusMock = vi.hoisted(() => vi.fn());
+const savePostRequestMock = vi.hoisted(() => vi.fn());
+const unsavePostRequestMock = vi.hoisted(() => vi.fn());
 const ApiErrorMock = vi.hoisted(
   () =>
     class ApiError extends Error {
@@ -22,9 +29,16 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 
 vi.mock("@/lib/api/posts", () => ({
+  fetchPostLikesPage: fetchPostLikesPageMock,
   likePostRequest: likePostRequestMock,
   unlikePostRequest: unlikePostRequestMock,
   createPostComment: createPostCommentMock,
+  deletePostCommentRequest: deletePostCommentRequestMock,
+  deletePostRequest: deletePostRequestMock,
+  updatePostCaptionRequest: updatePostCaptionRequestMock,
+  fetchPostSavedStatus: fetchPostSavedStatusMock,
+  savePostRequest: savePostRequestMock,
+  unsavePostRequest: unsavePostRequestMock,
 }));
 
 vi.mock("@/lib/api/client", () => ({
@@ -32,11 +46,25 @@ vi.mock("@/lib/api/client", () => ({
 }));
 
 import { ApiError } from "@/lib/api/client";
+import { DELETE as commentDeleteRoute } from "../../app/api/posts/[postId]/comments/[commentId]/route";
 import { POST as commentPostRoute } from "../../app/api/posts/[postId]/comments/route";
 import {
   POST as likePostRoute,
   DELETE as unlikePostRoute,
 } from "../../app/api/posts/[postId]/likes/route";
+import {
+  DELETE as deletePostRoute,
+  PATCH as patchPostRoute,
+} from "../../app/api/posts/[postId]/route";
+import {
+  GET as getSavedStatusRoute,
+  POST as savePostRoute,
+  DELETE as unsavePostRoute,
+} from "../../app/api/posts/[postId]/saved/route";
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("post route handlers", () => {
   it("propagates backend error status for like endpoint", async () => {
@@ -69,6 +97,77 @@ describe("post route handlers", () => {
     expect(payload.detail).toBe("Post not found");
   });
 
+  it("returns saved status for saved endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    fetchPostSavedStatusMock.mockResolvedValueOnce(true);
+
+    const response = await getSavedStatusRoute(
+      new Request("http://localhost"),
+      {
+        params: { postId: "42" },
+      },
+    );
+    const payload = (await response.json()) as { is_saved?: boolean };
+
+    expect(response.status).toBe(200);
+    expect(payload.is_saved).toBe(true);
+  });
+
+  it("returns 400 for invalid post id on saved endpoints", async () => {
+    const getResponse = await getSavedStatusRoute(
+      new Request("http://localhost"),
+      {
+        params: { postId: "invalid-id" },
+      },
+    );
+    const postResponse = await savePostRoute(new Request("http://localhost"), {
+      params: { postId: "invalid-id" },
+    });
+    const deleteResponse = await unsavePostRoute(
+      new Request("http://localhost"),
+      {
+        params: { postId: "invalid-id" },
+      },
+    );
+
+    expect(getResponse.status).toBe(400);
+    expect(postResponse.status).toBe(400);
+    expect(deleteResponse.status).toBe(400);
+    expect(fetchPostSavedStatusMock).not.toHaveBeenCalled();
+    expect(savePostRequestMock).not.toHaveBeenCalled();
+    expect(unsavePostRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates backend error status for save endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    savePostRequestMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+
+    const response = await savePostRoute(new Request("http://localhost"), {
+      params: { postId: "42" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.detail).toBe("Post not found");
+  });
+
+  it("propagates backend error status for unsave endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    unsavePostRequestMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+
+    const response = await unsavePostRoute(new Request("http://localhost"), {
+      params: { postId: "42" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.detail).toBe("Post not found");
+  });
+
   it("propagates backend error status for comment creation endpoint", async () => {
     getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
     createPostCommentMock.mockRejectedValueOnce(
@@ -87,5 +186,133 @@ describe("post route handlers", () => {
 
     expect(response.status).toBe(404);
     expect(payload.detail).toBe("Post not found");
+  });
+
+  it("returns 400 for invalid comment id on comment delete endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+
+    const response = await commentDeleteRoute(new Request("http://localhost"), {
+      params: { postId: "42", commentId: "invalid-id" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.detail).toBe("Invalid comment id");
+    expect(deletePostCommentRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates backend error status for comment delete endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    deletePostCommentRequestMock.mockRejectedValueOnce(
+      new ApiError(404, "Comment not found"),
+    );
+
+    const response = await commentDeleteRoute(new Request("http://localhost"), {
+      params: { postId: "42", commentId: "7" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.detail).toBe("Comment not found");
+    expect(deletePostCommentRequestMock).toHaveBeenCalledWith(
+      "42",
+      "7",
+      "access-token",
+    );
+  });
+
+  it("returns 400 for invalid post id on delete endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+
+    const response = await deletePostRoute(new Request("http://localhost"), {
+      params: { postId: "invalid-id" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.detail).toBe("Invalid post id");
+    expect(deletePostRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates backend error status for delete endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    deletePostRequestMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+
+    const response = await deletePostRoute(new Request("http://localhost"), {
+      params: { postId: "42" },
+    });
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.detail).toBe("Post not found");
+  });
+
+  it("returns 400 for invalid payload on patch endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+
+    const response = await patchPostRoute(
+      new Request("http://localhost", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+      {
+        params: { postId: "42" },
+      },
+    );
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.detail).toBe("Caption must be a string or null");
+    expect(updatePostCaptionRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for invalid post id on patch endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+
+    const response = await patchPostRoute(
+      new Request("http://localhost", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caption: "Updated" }),
+      }),
+      {
+        params: { postId: "invalid-id" },
+      },
+    );
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.detail).toBe("Invalid post id");
+    expect(updatePostCaptionRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates backend error status for patch endpoint", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "access-token" });
+    updatePostCaptionRequestMock.mockRejectedValueOnce(
+      new ApiError(404, "Post not found"),
+    );
+
+    const response = await patchPostRoute(
+      new Request("http://localhost", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caption: "Updated" }),
+      }),
+      {
+        params: { postId: "42" },
+      },
+    );
+    const payload = (await response.json()) as { detail?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload.detail).toBe("Post not found");
+    expect(updatePostCaptionRequestMock).toHaveBeenCalledWith(
+      "42",
+      "Updated",
+      "access-token",
+    );
   });
 });

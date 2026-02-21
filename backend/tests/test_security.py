@@ -45,9 +45,16 @@ def test_refresh_token_has_refresh_type():
     assert payload["sub"] == "user-id"
 
 
-def test_settings_reject_insecure_secret_in_production():
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "mystagram-demo-secret",
+        "local-dev-secret-change-me",
+    ],
+)
+def test_settings_reject_insecure_secret_in_production(secret: str):
     with pytest.raises(ValueError):
-        Settings(APP_ENV="production", SECRET_KEY="mystagram-demo-secret")
+        Settings(APP_ENV="production", SECRET_KEY=secret)
 
 
 def test_settings_require_secret_in_production(monkeypatch):
@@ -56,6 +63,21 @@ def test_settings_require_secret_in_production(monkeypatch):
 
     with pytest.raises(ValueError):
         Settings(APP_ENV="production", _env_file=None)
+
+
+def test_settings_require_minimum_secret_length_in_production():
+    with pytest.raises(ValueError):
+        Settings(APP_ENV="production", SECRET_KEY="short-secret")
+
+
+def test_settings_accept_strong_secret_length_in_production():
+    settings = Settings(
+        APP_ENV="production",
+        SECRET_KEY="a" * 32,
+        ALLOW_INSECURE_HTTP_COOKIES=False,
+        _env_file=None,
+    )
+    assert settings.secret_key == "a" * 32
 
 
 def test_settings_accept_legacy_jwt_secret_alias(monkeypatch):
@@ -68,3 +90,27 @@ def test_settings_accept_legacy_jwt_secret_alias(monkeypatch):
         _env_file=None,
     )
     assert settings.secret_key == "legacy-secret-value"
+
+
+@pytest.mark.parametrize("app_env", ["production", "staging"])
+def test_settings_reject_insecure_http_cookies_outside_local(
+    app_env: str,
+):
+    with pytest.raises(ValueError):
+        Settings(
+            APP_ENV=app_env,
+            SECRET_KEY="strong-production-secret-value-1234567890",
+            ALLOW_INSECURE_HTTP_COOKIES=True,
+        )
+
+
+@pytest.mark.parametrize("app_env", ["local", "test"])
+def test_settings_allow_insecure_http_cookies_for_local_like_env(
+    app_env: str,
+):
+    settings = Settings(
+        APP_ENV=app_env,
+        SECRET_KEY="local-secret",
+        ALLOW_INSECURE_HTTP_COOKIES=True,
+    )
+    assert settings.allow_insecure_http_cookies is True

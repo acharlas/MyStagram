@@ -132,7 +132,7 @@ export function PostForm() {
           name="image"
           ref={fileInputRef}
           onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          className="ui-surface-input mt-2 block w-full cursor-pointer rounded-xl border border-dashed ui-border px-3 py-2 text-sm text-zinc-200 file:mr-4 file:rounded-md file:border-0 file:bg-[color:var(--ui-surface-muted)] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-zinc-200 hover:border-[color:var(--ui-border-strong)] hover:file:bg-[color:var(--ui-surface-muted)]"
+          className="ui-focus-ring ui-surface-input ui-text-muted mt-2 block w-full cursor-pointer rounded-xl border border-dashed ui-border px-3 py-2 text-sm file:mr-4 file:rounded-md file:border-0 file:bg-[color:var(--ui-surface-muted)] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-[color:var(--ui-text-strong)] hover:border-[color:var(--ui-border-strong)] hover:file:bg-[color:var(--ui-surface-muted)]"
           disabled={isPending}
           required
         />
@@ -164,7 +164,7 @@ export function PostForm() {
           value={caption}
           onChange={(event) => setCaption(event.target.value)}
           rows={4}
-          className="ui-surface-input mt-2 w-full rounded-xl border ui-border px-3 py-2 text-sm text-zinc-100 placeholder:text-[color:var(--ui-text-subtle)] focus:outline-none focus:ring-2 focus:ring-sky-500/70"
+          className="ui-focus-ring ui-surface-input ui-text-strong mt-2 w-full rounded-xl border ui-border px-3 py-2 text-sm placeholder:text-[color:var(--ui-text-subtle)] focus:outline-none"
           placeholder="Décrivez votre photo…"
           disabled={isPending}
         />
@@ -173,12 +173,14 @@ export function PostForm() {
         </p>
       </div>
 
-      {error ? <p className="text-sm text-red-400">{error}</p> : null}
+      {error ? (
+        <p className="ui-error-surface rounded-xl px-3 py-2 text-sm">{error}</p>
+      ) : null}
 
       <button
         type="submit"
         disabled={isPending}
-        className="self-end rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+        className="ui-focus-ring ui-accent-button self-end rounded-full px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
       >
         {isPending ? "Publication..." : "Publier"}
       </button>

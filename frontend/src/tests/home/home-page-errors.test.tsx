@@ -2,14 +2,32 @@ import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getSessionServerMock = vi.hoisted(() => vi.fn());
-const apiServerFetchMock = vi.hoisted(() => vi.fn());
+const fetchHomeFeedPageMock = vi.hoisted(() => vi.fn());
+const searchUsersServerMock = vi.hoisted(() => vi.fn());
+const fetchUserFollowStatusMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
   getSessionServer: getSessionServerMock,
 }));
 
+vi.mock("@/lib/api/posts", () => ({
+  fetchHomeFeedPage: fetchHomeFeedPageMock,
+}));
+
+vi.mock("@/lib/api/users", () => ({
+  searchUsersServer: searchUsersServerMock,
+  fetchUserFollowStatus: fetchUserFollowStatusMock,
+}));
+
 vi.mock("@/lib/api/client", () => ({
-  apiServerFetch: apiServerFetchMock,
+  ApiError: class ApiError extends Error {
+    status: number;
+
+    constructor(status: number, message?: string) {
+      super(message);
+      this.status = status;
+    }
+  },
 }));
 
 import ProtectedHomePage from "@/app/(protected)/page";
@@ -26,7 +44,9 @@ describe("ProtectedHomePage error semantics", () => {
       accessToken: "token-1",
       user: { username: "viewer" },
     });
-    apiServerFetchMock.mockRejectedValueOnce(new Error("backend down"));
+    fetchHomeFeedPageMock.mockRejectedValueOnce(new Error("backend down"));
+    searchUsersServerMock.mockResolvedValue([]);
+    fetchUserFollowStatusMock.mockResolvedValue(false);
 
     await expect(ProtectedHomePage()).rejects.toThrow("backend down");
   });
@@ -39,6 +59,8 @@ describe("ProtectedHomePage error semantics", () => {
     const page = await ProtectedHomePage();
 
     expect(page).toBeDefined();
-    expect(apiServerFetchMock).not.toHaveBeenCalled();
+    expect(fetchHomeFeedPageMock).not.toHaveBeenCalled();
+    expect(searchUsersServerMock).not.toHaveBeenCalled();
+    expect(fetchUserFollowStatusMock).not.toHaveBeenCalled();
   });
 });

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getSessionServerMock = vi.hoisted(() => vi.fn());
 const fetchUserProfileMock = vi.hoisted(() => vi.fn());
-const fetchUserPostsMock = vi.hoisted(() => vi.fn());
+const fetchUserPostsPageMock = vi.hoisted(() => vi.fn());
 const notFoundMock = vi.hoisted(() =>
   vi.fn(() => {
     throw new Error("__NOT_FOUND__");
@@ -37,6 +37,11 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("next/navigation", () => ({
   notFound: notFoundMock,
+  usePathname: () => "/users/alice",
+  useRouter: () => ({
+    replace: vi.fn(),
+  }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("@/lib/api/users", async () => {
@@ -45,7 +50,7 @@ vi.mock("@/lib/api/users", async () => {
   return {
     ...actual,
     fetchUserProfile: fetchUserProfileMock,
-    fetchUserPosts: fetchUserPostsMock,
+    fetchUserPostsPage: fetchUserPostsPageMock,
   };
 });
 
@@ -73,7 +78,7 @@ function restoreBackendApiUrl() {
 afterEach(() => {
   getSessionServerMock.mockReset();
   fetchUserProfileMock.mockReset();
-  fetchUserPostsMock.mockReset();
+  fetchUserPostsPageMock.mockReset();
   notFoundMock.mockReset();
   if (originalFetch) {
     globalThis.fetch = originalFetch;
@@ -97,7 +102,10 @@ describe("UserProfilePage follow-status integration", () => {
       bio: null,
       avatar_key: null,
     });
-    fetchUserPostsMock.mockResolvedValueOnce([]);
+    fetchUserPostsPageMock.mockResolvedValueOnce({
+      data: [],
+      nextOffset: null,
+    });
 
     const fetchMock = vi
       .fn()
@@ -135,7 +143,10 @@ describe("UserProfilePage follow-status integration", () => {
       bio: null,
       avatar_key: null,
     });
-    fetchUserPostsMock.mockResolvedValueOnce([]);
+    fetchUserPostsPageMock.mockResolvedValueOnce({
+      data: [],
+      nextOffset: null,
+    });
 
     const fetchMock = vi
       .fn()

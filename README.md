@@ -25,7 +25,8 @@ The repository is organised as:
 .
 ├── backend/            # FastAPI codebase
 ├── frontend/           # Next.js codebase
-├── docker-compose.yml  # Local runtime definition
+├── docker-compose.yml  # Showcase runtime (internet-facing demo baseline)
+├── docker-compose.dev.yml # Development override (hot reload + tool ports)
 ├── .env.backend        # Backend environment values (not committed)
 ├── .env.frontend       # Frontend environment values (not committed)
 └── README.md
@@ -43,19 +44,28 @@ APP_ENV=local
 BACKEND_API_URL=http://backend:8000
 DATABASE_URL=postgresql+asyncpg://app:app@postgres:5432/instagram
 REDIS_URL=redis://redis:6379/0
-MINIO_ENDPOINT=http://minio:9000
+RATE_LIMIT_PROXY_SECRET=<shared-random-string>
+MINIO_ENDPOINT=minio:9000
+MINIO_BUCKET=instagram-media
 MINIO_ACCESS_KEY=<your-minio-access-key>
 MINIO_SECRET_KEY=<your-minio-secret-key>
-JWT_SECRET=<random-string>
+SECRET_KEY=<random-string>
+ALLOW_INSECURE_HTTP_COOKIES=true
 ```
+
+`ALLOW_INSECURE_HTTP_COOKIES=true` is for local Docker HTTP only; keep it unset/false in staging and production.
 
 ### `.env.frontend`
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_MINIO_BASE_URL=http://minio:9000/instagram-media
 NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=<random-string>
+RATE_LIMIT_PROXY_SECRET=<shared-random-string>
+MEDIA_SIGNED_URL_ALLOWLIST=http://minio:9000
 ```
+
+Set the same `RATE_LIMIT_PROXY_SECRET` value in both `.env.backend` and `.env.frontend` so auth rate limiting can distinguish users behind the frontend container.
+`MEDIA_SIGNED_URL_ALLOWLIST` should contain internal storage origins the frontend server may fetch from (comma-separated); keep this on private Docker network hosts, not public URLs.
 
 The sample values above are safe defaults for local development. Replace the placeholders (`<...>`) with secrets when deploying elsewhere and keep those keys out of version control.
 
@@ -66,18 +76,30 @@ The sample values above are safe defaults for local development. Replace the pla
 1. **Install prerequisites**
    - Docker Desktop (or Docker Engine + Compose v2)
 
-2. **Boot the stack**
+2. **Boot showcase mode (default)**
    ```bash
-   docker compose up --build
+   docker compose up --build -d
    ```
-   - Frontend: http://localhost:3000  
-   - Backend docs: http://localhost:8000/docs  
-   - MinIO console: http://localhost:9001
+   - Frontend: http://localhost:3000
+   - A one-shot `minio-init` job auto-creates the media bucket.
+   - Only frontend is published to host.
+   - PostgreSQL, Redis, and MinIO stay on the internal Docker network.
+   - Media files are served through authenticated app routes, not public MinIO URLs.
 
-3. **Seed demo data (users, follows, posts with captions and placeholder images)**
+3. **Optional: boot development mode (hot reload + infra tool ports)**
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+   ```
+   - Enables bind mounts and reload for backend/frontend.
+   - Backend docs: http://localhost:8000/docs
+   - Exposes PostgreSQL (5432), Redis (6379), MinIO API (9000), MinIO console (9001).
+
+4. **Seed demo data (users, follows, posts with captions and placeholder images)**
    ```bash
    docker compose exec backend uv run python scripts/seed.py
    ```
+   Seeded users are assigned the same default avatar key used by registration (`avatars/default/default-avatar.png`).
+
    Demo accounts:
    - `demo_alex` / `password123`
    - `demo_bella` / `password123`
@@ -93,17 +115,48 @@ The sample values above are safe defaults for local development. Replace the pla
      docker compose exec -e SEED_MEDIA_DIR=/app/scripts/seed_media backend uv run python scripts/seed.py
      ```
 
-4. **Stop the stack**
+5. **Stop the stack**
    ```bash
    docker compose down
    ```
    Add `-v` to drop local volumes if you need a clean reset.
+
+Dismissed-notification backlog cleanup is launched in background at backend container startup.
+Set `DISMISSED_PRUNE_ON_STARTUP=false` in `.env.backend` to skip it.
+Startup prune is bounded by default:
+- `DISMISSED_MAX_USERS_PER_RUN=200`
+- `DISMISSED_MAX_ROWS_PER_RUN=5000`
+- `DISMISSED_MAX_ELAPSED_SECONDS=30`
+
+Default avatar asset is synchronized to MinIO at backend startup from:
+- `backend/assets/default_avatars/default-avatar.png`
+
+Set `SYNC_DEFAULT_AVATARS_ON_STARTUP=false` in `.env.backend` to skip this sync step.
+You can run it manually:
+```bash
+docker compose exec backend uv run python scripts/sync_default_avatars.py
+```
+
+You can still run it manually:
+```bash
+docker compose exec backend uv run python scripts/prune_dismissed_notifications.py
+```
 
 ---
 
 ## Runtime Model
 
 This project is Docker-only. Run backend and frontend through `docker compose`; direct host execution with `npm`, `uv`, or `python` is not a supported workflow.
+
+For portfolio demos reachable from the internet, use the default `docker-compose.yml` mode and keep infra services private.
+
+## Demo Guardrails
+
+Before exposing the app publicly (even as a demo), ensure:
+- `SECRET_KEY` and `NEXTAUTH_SECRET` are unique non-default values.
+- MinIO root credentials are non-default.
+- You run behind HTTPS/TLS at the edge (reverse proxy or tunnel).
+- You do not publish Postgres/Redis/MinIO ports on the host.
 
 ---
 

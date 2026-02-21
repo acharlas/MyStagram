@@ -24,12 +24,14 @@ COMMA_SEPARATED_FIELDS = frozenset(
 INSECURE_SECRET_KEY_VALUES = frozenset(
     {
         "mystagram-demo-secret",
+        "local-dev-secret-change-me",
         "change-me",
         "changeme",
         "<random-string>",
         "secret",
     }
 )
+MIN_SECRET_KEY_LENGTH_NON_LOCAL = 32
 
 
 class Settings(BaseSettings):
@@ -69,7 +71,7 @@ class Settings(BaseSettings):
     )
 
     upload_max_bytes: int = Field(
-        default=5 * 1024 * 1024, alias="UPLOAD_MAX_BYTES"
+        default=2 * 1024 * 1024, alias="UPLOAD_MAX_BYTES"
     )
 
     minio_endpoint: str = Field(default="minio:9000", alias="MINIO_ENDPOINT")
@@ -84,6 +86,10 @@ class Settings(BaseSettings):
     )
     refresh_token_expire_minutes: int = Field(
         default=60 * 24 * 7, alias="REFRESH_TOKEN_EXPIRE_MINUTES"
+    )
+    allow_insecure_http_cookies: bool = Field(
+        default=False,
+        alias="ALLOW_INSECURE_HTTP_COOKIES",
     )
 
     cors_origins: CommaSeparatedList = Field(
@@ -133,6 +139,14 @@ class Settings(BaseSettings):
 
         if app_env not in {"local", "test"} and secret in INSECURE_SECRET_KEY_VALUES:
             raise ValueError("SECRET_KEY uses an insecure placeholder value")
+        if app_env not in {"local", "test"} and len(secret) < MIN_SECRET_KEY_LENGTH_NON_LOCAL:
+            raise ValueError(
+                f"SECRET_KEY must be at least {MIN_SECRET_KEY_LENGTH_NON_LOCAL} characters for non-local environments"
+            )
+        if self.allow_insecure_http_cookies and app_env not in {"local", "test"}:
+            raise ValueError(
+                "ALLOW_INSECURE_HTTP_COOKIES is only permitted for local/test environments"
+            )
         return self
 
     @classmethod

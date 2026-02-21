@@ -27,9 +27,15 @@ class SupportsRateLimitClient(Protocol):
     async def expire(self, key: str, ttl: int) -> None: ...
 
 
+@runtime_checkable
+class SupportsRateLimiter(Protocol):
+    async def allow(self, key: str) -> bool: ...
+
+
 ACCESS_COOKIE_NAME = "access_token"
 REFRESH_COOKIE_NAME = "refresh_token"
 SUPPORTED_TOKEN_TYPES = frozenset({"access", "refresh"})
+AUTH_PATH_PREFIX = "/api/v1/auth"
 FORWARDED_CLIENT_KEY_HEADER = "x-rate-limit-client"
 FORWARDED_CLIENT_SIGNATURE_HEADER = "x-rate-limit-signature"
 FORWARDED_CLIENT_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
@@ -168,18 +174,21 @@ def _is_trusted_proxy(remote_ip: IPv4Address | IPv6Address | None) -> bool:
 
 def default_client_identifier(request: Request) -> str:
     """Resolve a stable client identifier for rate limiting."""
+    remote_host, remote_ip = _remote_ip(request)
+
+    # Signed forwarded identifiers are verified with HMAC and do not rely
+    # on source IP trust assumptions.
+    forwarded_identifier = _extract_forwarded_client_identifier(request)
+    if forwarded_identifier is not None:
+        return forwarded_identifier
+
     authenticated_identifier = _extract_authenticated_client_identifier(request)
     if authenticated_identifier is not None:
         return authenticated_identifier
 
-    remote_host, remote_ip = _remote_ip(request)
-
     # Only trust forwarded source IP headers from explicitly configured
     # proxy/load balancer networks.
     if _is_trusted_proxy(remote_ip):
-        forwarded_identifier = _extract_forwarded_client_identifier(request)
-        if forwarded_identifier is not None:
-            return forwarded_identifier
         forwarded_ip = _extract_client_ip_from_headers(request)
         if forwarded_ip:
             return forwarded_ip
@@ -252,13 +261,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app: ASGIApp,
-        limiter_factory: Callable[[], RateLimiter],
+        limiter_factory: Callable[[], SupportsRateLimiter],
         exempt_paths: Iterable[str] | None = None,
         exempt_prefixes: Iterable[str] | None = None,
         client_identifier: Callable[[Request], str] | None = None,
     ) -> None:
         super().__init__(app)
-        self._limiter: RateLimiter | None = None
+        self._limiter: SupportsRateLimiter | None = None
         self.limiter_factory = limiter_factory
         self.exempt_paths = set(exempt_paths or ())
         self.exempt_prefixes = tuple(exempt_prefixes or ())
@@ -278,10 +287,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         limiter = override if override is not None else self._get_limiter()
 
         if limiter is None:
+            if _is_auth_path(path):
+                return JSONResponse(
+                    {"detail": "Service unavailable"},
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
             return await call_next(request)
 
         client_key = self.client_identifier(request) or "anonymous"
-        if not await limiter.allow(client_key):
+        try:
+            is_allowed = await limiter.allow(client_key)
+        except Exception:  # pragma: no cover - defensive fallback for Redis outages
+            if _is_auth_path(path):
+                return JSONResponse(
+                    {"detail": "Service unavailable"},
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            return await call_next(request)
+
+        if not is_allowed:
             return JSONResponse(
                 {"detail": "Too Many Requests"},
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -289,10 +313,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         return await call_next(request)
 
-    def _get_limiter(self) -> RateLimiter | None:
+    def _get_limiter(self) -> SupportsRateLimiter | None:
         if self._limiter is None:
             try:
                 self._limiter = self.limiter_factory()
             except Exception:  # pragma: no cover - defensive fallback
                 self._limiter = None
         return self._limiter
+
+
+def _is_auth_path(path: str) -> bool:
+    return path == AUTH_PATH_PREFIX or path.startswith(f"{AUTH_PATH_PREFIX}/")

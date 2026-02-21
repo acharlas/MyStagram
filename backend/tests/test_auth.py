@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from models import RefreshToken, User
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], column == value)
+
 
 def build_payload() -> dict[str, str | None]:
     suffix = uuid4().hex[:8]
@@ -43,6 +45,7 @@ async def test_register_creates_user(async_client, db_session: AsyncSession):
     )
     user = result.scalar_one()
     assert user.password_hash != payload["password"]
+    assert user.avatar_key == "avatars/default/default-avatar.png"
 
 
 @pytest.mark.asyncio
@@ -56,9 +59,51 @@ async def test_register_normalizes_email_to_lowercase(async_client):
 
 
 @pytest.mark.asyncio
-async def test_register_rejects_email_like_username(async_client):
+@pytest.mark.parametrize(
+    "username",
+    [
+        "not_allowed@example.com",
+        "bad/name",
+        ".leadingdot",
+        "trailingdot.",
+        "space name",
+    ],
+)
+async def test_register_rejects_invalid_username_format(async_client, username: str):
     payload = build_payload()
-    payload["username"] = "not_allowed@example.com"
+    payload["username"] = username
+
+    response = await async_client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_accepts_username_with_allowed_symbols(async_client):
+    payload = build_payload()
+    payload["username"] = "alpha.user_name"
+
+    response = await async_client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["username"] == payload["username"]
+
+
+@pytest.mark.asyncio
+async def test_register_accepts_max_length_canonical_username(async_client):
+    payload = build_payload()
+    payload["username"] = "a" + ("b" * 28) + "z"
+
+    response = await async_client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["username"] == payload["username"]
+
+
+@pytest.mark.asyncio
+async def test_register_rejects_too_long_bio(async_client):
+    payload = build_payload()
+    payload["bio"] = "x" * 121
 
     response = await async_client.post("/api/v1/auth/register", json=payload)
 
@@ -279,7 +324,9 @@ async def test_login_email_alias_still_authenticates_displaced_account(
 
 
 @pytest.mark.asyncio
-async def test_refresh_reuses_refresh_token(async_client, db_session: AsyncSession):
+async def test_refresh_rotates_refresh_token_and_revokes_previous_token(
+    async_client, db_session: AsyncSession
+):
     payload = build_payload()
     await async_client.post("/api/v1/auth/register", json=payload)
     login_response = await async_client.post(
@@ -294,14 +341,52 @@ async def test_refresh_reuses_refresh_token(async_client, db_session: AsyncSessi
     refresh_response = await async_client.post("/api/v1/auth/refresh")
     assert refresh_response.status_code == 200
     refreshed_token = refresh_response.json()["refresh_token"]
-    assert refreshed_token == old_refresh
+    assert refreshed_token != old_refresh
 
-    hashed_old = hashlib.sha256(old_refresh.encode()).hexdigest()
-    result = await db_session.execute(
-        select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed_old))
+    old_hashed = hashlib.sha256(old_refresh.encode()).hexdigest()
+    old_result = await db_session.execute(
+        select(RefreshToken).where(_eq(RefreshToken.token_hash, old_hashed))
     )
-    stored = result.scalar_one()
-    assert stored.revoked_at is None
+    old_stored_token = old_result.scalar_one()
+    assert old_stored_token.revoked_at is not None
+
+    new_hashed = hashlib.sha256(refreshed_token.encode()).hexdigest()
+    new_result = await db_session.execute(
+        select(RefreshToken).where(_eq(RefreshToken.token_hash, new_hashed))
+    )
+    new_stored_token = new_result.scalar_one()
+    assert new_stored_token.revoked_at is None
+
+    async_client.cookies.set("refresh_token", old_refresh)
+    replay_response = await async_client.post("/api/v1/auth/refresh")
+    assert replay_response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_revoked_refresh_token(
+    async_client, db_session: AsyncSession
+):
+    payload = build_payload()
+    await async_client.post("/api/v1/auth/register", json=payload)
+    login_response = await async_client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": payload["username"],
+            "password": payload["password"],
+        },
+    )
+    old_refresh = login_response.json()["refresh_token"]
+
+    hashed = hashlib.sha256(old_refresh.encode()).hexdigest()
+    token_result = await db_session.execute(
+        select(RefreshToken).where(_eq(RefreshToken.token_hash, hashed))
+    )
+    token = token_result.scalar_one()
+    token.revoked_at = datetime.now(timezone.utc)
+    await db_session.commit()
+
+    refresh_response = await async_client.post("/api/v1/auth/refresh")
+    assert refresh_response.status_code == 401
 
 
 @pytest.mark.asyncio

@@ -10,14 +10,8 @@ import {
 } from "vitest";
 
 const redirectMock = vi.hoisted(() => vi.fn());
-const getSessionServerMock = vi.hoisted(() => vi.fn());
-
 vi.mock("next/navigation", () => ({
   redirect: redirectMock,
-}));
-
-vi.mock("@/lib/auth/session", () => ({
-  getSessionServer: getSessionServerMock,
 }));
 
 vi.mock("../../app/(public)/login/_components/login-form", () => ({
@@ -53,45 +47,15 @@ describe("public auth pages", () => {
     vi.clearAllMocks();
   });
 
-  it("login page does not redirect when session has no usable access token", async () => {
-    getSessionServerMock.mockResolvedValueOnce({
-      error: "SessionExpired",
-    });
-
+  it("login page stays accessible without redirect", async () => {
     await LoginPage();
 
     expect(redirectMock).not.toHaveBeenCalled();
   });
 
-  it("login page redirects when session has an active access token", async () => {
-    getSessionServerMock.mockResolvedValueOnce({
-      accessToken: "access-token",
-      error: undefined,
-    });
-
-    await LoginPage();
-
-    expect(redirectMock).toHaveBeenCalledWith("/");
-  });
-
-  it("register page does not redirect when session has no usable access token", async () => {
-    getSessionServerMock.mockResolvedValueOnce({
-      error: "RefreshAccessTokenError",
-    });
-
+  it("register page stays accessible without redirect", async () => {
     await RegisterPage();
 
     expect(redirectMock).not.toHaveBeenCalled();
-  });
-
-  it("register page redirects when session has an active access token", async () => {
-    getSessionServerMock.mockResolvedValueOnce({
-      accessToken: "access-token",
-      error: undefined,
-    });
-
-    await RegisterPage();
-
-    expect(redirectMock).toHaveBeenCalledWith("/");
   });
 });

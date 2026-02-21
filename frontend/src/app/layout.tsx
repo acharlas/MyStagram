@@ -30,6 +30,9 @@ export default function RootLayout({
   return (
     <html lang="fr">
       <body className={`${sora.variable} ${geistMono.variable} antialiased`}>
+        <a href="#main-content" className="ui-skip-link">
+          Aller au contenu
+        </a>
         {children}
       </body>
     </html>

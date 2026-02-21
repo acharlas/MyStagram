@@ -1,16 +1,13 @@
-import { getServerSession } from "next-auth";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, apiServerFetch } from "@/lib/api/client";
+import { ApiError, apiServerFetch, apiServerFetchPage } from "@/lib/api/client";
 import SettingsPage from "../../app/(protected)/settings/page";
 
-vi.mock("next-auth", () => ({
-  getServerSession: vi.fn(),
-}));
+const getSessionServerMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/app/api/auth/[...nextauth]/route", () => ({
-  authOptions: {},
+vi.mock("@/lib/auth/session", () => ({
+  getSessionServer: getSessionServerMock,
 }));
 
 vi.mock("@/components/ui/avatar", () => ({
@@ -33,21 +30,26 @@ vi.mock("@/lib/api/client", async () => {
   return {
     ...actual,
     apiServerFetch: vi.fn(),
+    apiServerFetchPage: vi.fn(),
   };
 });
 
-const mockedGetServerSession = vi.mocked(getServerSession);
 const mockedApiServerFetch = vi.mocked(apiServerFetch);
+const mockedApiServerFetchPage = vi.mocked(apiServerFetchPage);
 
 (globalThis as unknown as { React: typeof React }).React = React;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockedApiServerFetchPage.mockResolvedValue({
+    data: [],
+    nextOffset: null,
+  });
 });
 
 describe("SettingsPage", () => {
   it("shows a reconnect prompt when session is missing", async () => {
-    mockedGetServerSession.mockResolvedValue(null);
+    getSessionServerMock.mockResolvedValue(null);
 
     const html = renderToStaticMarkup(await SettingsPage());
 
@@ -56,9 +58,9 @@ describe("SettingsPage", () => {
   });
 
   it("renders current profile details when session is valid", async () => {
-    mockedGetServerSession.mockResolvedValue({
+    getSessionServerMock.mockResolvedValue({
       accessToken: "token-123",
-    } as Awaited<ReturnType<typeof getServerSession>>);
+    });
 
     mockedApiServerFetch.mockResolvedValue({
       username: "alice",
@@ -82,9 +84,9 @@ describe("SettingsPage", () => {
   });
 
   it("gracefully handles a missing profile", async () => {
-    mockedGetServerSession.mockResolvedValue({
+    getSessionServerMock.mockResolvedValue({
       accessToken: "token-123",
-    } as Awaited<ReturnType<typeof getServerSession>>);
+    });
 
     mockedApiServerFetch.mockRejectedValue(new ApiError(404));
 
@@ -94,9 +96,9 @@ describe("SettingsPage", () => {
   });
 
   it("renders server action error feedback when provided in search params", async () => {
-    mockedGetServerSession.mockResolvedValue({
+    getSessionServerMock.mockResolvedValue({
       accessToken: "token-123",
-    } as Awaited<ReturnType<typeof getServerSession>>);
+    });
 
     mockedApiServerFetch.mockResolvedValue({
       username: "alice",

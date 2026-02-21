@@ -1,137 +1,156 @@
-import Image from "next/image";
-import Link from "next/link";
+import { redirect } from "next/navigation";
 
-import { LikeButton } from "@/components/post/LikeButton";
-import { CommentIcon } from "@/components/ui/icons";
-import { apiServerFetch } from "@/lib/api/client";
+import { followUserAction } from "@/app/(protected)/users/[username]/actions";
+import { HomeFeedList } from "@/components/feed/HomeFeedList";
+import { WhoToFollowPanel } from "@/components/user/WhoToFollowPanel";
+import { ApiError, type ApiPage } from "@/lib/api/client";
+import { fetchHomeFeedPage } from "@/lib/api/posts";
+import {
+  fetchUserFollowStatus,
+  searchUsersServer,
+  type UserProfilePublic,
+} from "@/lib/api/users";
 import { getSessionServer } from "@/lib/auth/session";
-import { buildImageUrl } from "@/lib/image";
-import { sanitizeHtml } from "@/lib/sanitize";
 import type { FeedPost } from "@/types/feed";
 
-async function getHomeFeed(accessToken?: string): Promise<FeedPost[]> {
+const HOME_FEED_PAGE_SIZE = 10;
+const WHO_TO_FOLLOW_LIMIT = 6;
+const WHO_TO_FOLLOW_QUERY_LIMIT = 6;
+const WHO_TO_FOLLOW_QUERIES = ["a", "e", "m"] as const;
+const MAX_WHO_TO_FOLLOW_CANDIDATES = 18;
+
+async function getHomeFeedPage(
+  accessToken?: string,
+): Promise<ApiPage<FeedPost[]> | null> {
+  if (!accessToken) {
+    return {
+      data: [],
+      nextOffset: null,
+    };
+  }
+
+  try {
+    return await fetchHomeFeedPage(
+      {
+        limit: HOME_FEED_PAGE_SIZE,
+        offset: 0,
+      },
+      accessToken,
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function getWhoToFollowSuggestions(
+  accessToken?: string,
+  viewerUsername?: string | null,
+): Promise<UserProfilePublic[]> {
   if (!accessToken) {
     return [];
   }
 
-  return apiServerFetch<FeedPost[]>("/api/v1/feed/home", {
-    cache: "no-store",
-    headers: {
-      Cookie: `access_token=${accessToken}`,
-    },
-  });
-}
+  const candidatesById = new Map<string, UserProfilePublic>();
 
-function PostCard({ post }: { post: FeedPost }) {
-  const safeCaption = post.caption ? sanitizeHtml(post.caption) : "";
-  const imageUrl = buildImageUrl(post.image_key);
-  const displayName =
-    post.author_name ?? post.author_username ?? post.author_id;
-  const authorUsername = post.author_username ?? undefined;
-  const initials = displayName
-    .split(/\s+/u)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+  for (const query of WHO_TO_FOLLOW_QUERIES) {
+    let users: UserProfilePublic[] = [];
+    try {
+      users = await searchUsersServer(
+        query,
+        { limit: WHO_TO_FOLLOW_QUERY_LIMIT },
+        accessToken,
+      );
+    } catch (error) {
+      console.error(
+        "Failed to load who-to-follow suggestions for query",
+        error,
+      );
+      continue;
+    }
 
-  return (
-    <article className="ui-surface-card group rounded-3xl border ui-border p-4 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] backdrop-blur sm:p-5">
-      <header className="flex items-center gap-3">
-        <div className="ui-surface-muted flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold text-zinc-200 ring-1 ring-[color:var(--ui-border)]">
-          {initials || displayName.slice(0, 2).toUpperCase()}
-        </div>
-        <div className="min-w-0 text-sm">
-          {authorUsername ? (
-            <Link
-              href={`/users/${encodeURIComponent(authorUsername)}`}
-              className="truncate font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
-            >
-              {displayName}
-            </Link>
-          ) : (
-            <p className="truncate font-semibold text-zinc-100">
-              {displayName}
-            </p>
-          )}
-          {authorUsername ? (
-            <p className="ui-text-muted truncate text-xs">@{authorUsername}</p>
-          ) : null}
-        </div>
-      </header>
+    for (const user of users) {
+      if (viewerUsername && user.username === viewerUsername) {
+        continue;
+      }
+      if (candidatesById.has(user.id)) {
+        continue;
+      }
+      candidatesById.set(user.id, user);
+      if (candidatesById.size >= MAX_WHO_TO_FOLLOW_CANDIDATES) {
+        break;
+      }
+    }
 
-      <Link
-        href={`/posts/${post.id}`}
-        className="mt-4 block overflow-hidden rounded-2xl focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
-      >
-        <div className="ui-surface-input relative aspect-square w-full overflow-hidden rounded-2xl">
-          <Image
-            src={imageUrl}
-            alt={`Publication ${post.id}`}
-            fill
-            className="object-cover transition duration-500 group-hover:scale-[1.02]"
-            sizes="(max-width: 768px) 100vw, 600px"
-          />
-        </div>
-      </Link>
+    if (candidatesById.size >= MAX_WHO_TO_FOLLOW_CANDIDATES) {
+      break;
+    }
+  }
 
-      {safeCaption ? (
-        <p className="mt-3 text-sm leading-relaxed text-zinc-200">
-          {safeCaption}
-        </p>
-      ) : (
-        <p className="ui-text-subtle mt-3 text-sm">Aucune légende</p>
-      )}
+  const candidates = Array.from(candidatesById.values());
+  if (candidates.length === 0) {
+    return [];
+  }
 
-      <footer className="ui-text-muted mt-4 flex items-center gap-3">
-        <LikeButton
-          postId={post.id}
-          initialLiked={post.viewer_has_liked}
-          initialCount={post.like_count}
-        />
-        <Link
-          href={`/posts/${post.id}`}
-          className="inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-sm text-zinc-300 transition hover:bg-[color:var(--ui-surface-muted)] hover:text-zinc-100"
-          aria-label="Voir les commentaires"
-        >
-          <CommentIcon className="h-4 w-4" />
-          <span>Commentaires</span>
-        </Link>
-      </footer>
-    </article>
+  const followedUsernames = new Set<string>();
+  await Promise.all(
+    candidates.map(async (user) => {
+      try {
+        const followStatus = await fetchUserFollowStatus(
+          user.username,
+          accessToken,
+        );
+        if (followStatus.is_following) {
+          followedUsernames.add(user.username);
+        }
+      } catch (error) {
+        console.error("Failed to resolve follow status for suggestion", error);
+      }
+    }),
   );
+
+  return candidates
+    .filter((user) => !followedUsernames.has(user.username))
+    .slice(0, WHO_TO_FOLLOW_LIMIT);
 }
 
 export default async function ProtectedHomePage() {
   const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
-  const posts = await getHomeFeed(accessToken);
+  const viewerUsername =
+    typeof session?.user?.username === "string" ? session.user.username : null;
+
+  const [page, whoToFollow] = await Promise.all([
+    getHomeFeedPage(accessToken),
+    getWhoToFollowSuggestions(accessToken, viewerUsername),
+  ]);
+
+  if (page === null) {
+    redirect("/login");
+  }
 
   return (
-    <section className="mx-auto flex w-full max-w-2xl flex-col gap-5 pb-6 pt-2">
-      <header className="ui-surface-card rounded-2xl border ui-border px-4 py-3 backdrop-blur">
-        <p className="ui-text-subtle text-xs uppercase tracking-[0.2em]">
-          Feed
-        </p>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight text-zinc-100">
-          Pour vous
-        </h1>
-      </header>
-
-      {posts.length === 0 ? (
-        <div className="ui-surface-card ui-text-muted rounded-2xl border ui-border p-6 text-center text-sm">
-          <p>Le fil d&apos;actualité est vide pour le moment.</p>
-          <Link
-            href="/posts/new"
-            className="mt-4 inline-flex rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500"
-          >
-            Publier une photo
-          </Link>
+    <section className="mx-auto w-full max-w-[1320px] pb-6 pt-2">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,42rem)_20rem] xl:gap-6">
+        <div className="hidden xl:block" aria-hidden />
+        <div className="flex min-w-0 flex-col gap-5">
+          <HomeFeedList
+            initialPosts={page.data}
+            initialNextOffset={page.nextOffset}
+            pageSize={HOME_FEED_PAGE_SIZE}
+          />
         </div>
-      ) : (
-        posts.map((post) => <PostCard key={post.id} post={post} />)
-      )}
+        <div className="w-full xl:justify-self-end">
+          <div className="xl:sticky xl:top-5">
+            <WhoToFollowPanel
+              initialUsers={whoToFollow}
+              followAction={followUserAction}
+            />
+          </div>
+        </div>
+      </div>
     </section>
   );
 }

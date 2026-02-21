@@ -1,0 +1,1230 @@
+"""Tests for notification dismissal persistence endpoints."""
+
+import asyncio
+from datetime import datetime, timedelta, timezone
+from typing import Any, cast
+from uuid import uuid4
+
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import delete, event, func, select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.sql import ColumnElement
+
+from models import Comment, DismissedNotification, FollowRequest, Like, Post, User
+from services.notifications import dismissals as notification_dismissals
+
+
+def make_user_payload(prefix: str) -> dict[str, str]:
+    suffix = uuid4().hex[:8]
+    return {
+        "username": f"{prefix}_{suffix}",
+        "email": f"{prefix}_{suffix}@example.com",
+        "password": "Sup3rSecret!",
+    }
+
+
+async def register_and_login(async_client: AsyncClient, payload: dict[str, str]) -> None:
+    register_response = await async_client.post("/api/v1/auth/register", json=payload)
+    assert register_response.status_code == 201
+
+    login_response = await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": payload["username"], "password": payload["password"]},
+    )
+    assert login_response.status_code == 200
+
+
+async def login(async_client: AsyncClient, payload: dict[str, str]) -> None:
+    login_response = await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": payload["username"], "password": payload["password"]},
+    )
+    assert login_response.status_code == 200
+
+
+def _eq(column: Any, value: Any) -> ColumnElement[bool]:
+    return cast(ColumnElement[bool], column == value)
+
+
+async def get_user_by_username(
+    session: AsyncSession, username: str
+) -> User:
+    result = await session.execute(select(User).where(_eq(User.username, username)))
+    user = result.scalar_one()
+    if user.id is None:  # pragma: no cover - defensive
+        raise ValueError("User record missing identifier")
+    return user
+
+
+@pytest.mark.asyncio
+async def test_notification_dismiss_requires_auth(async_client: AsyncClient) -> None:
+    post_response = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": "comment-1-1"},
+    )
+    get_response = await async_client.get("/api/v1/notifications/dismissed")
+
+    assert post_response.status_code == 401
+    assert get_response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_notification_bulk_dismiss_requires_auth(async_client: AsyncClient) -> None:
+    response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={"notification_ids": ["comment-1-1", "comment-1-2"]},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_bulk_dismiss_notifications_persists_trimmed_unique_identifiers(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    payload = make_user_payload("notif_bulk")
+    await register_and_login(async_client, payload)
+
+    response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={
+            "notification_ids": [
+                "comment-42-7",
+                " comment-42-8 ",
+                "comment-42-7",
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"processed_count": 2}
+
+    listed = await async_client.get("/api/v1/notifications/dismissed")
+    assert listed.status_code == 200
+    assert set(listed.json()["notification_ids"]) == {"comment-42-7", "comment-42-8"}
+
+    result = await db_session.execute(select(DismissedNotification))
+    stored_ids = {
+        item.notification_id
+        for item in result.scalars().all()
+        if item.notification_id.startswith("comment-42-")
+    }
+    assert stored_ids == {"comment-42-7", "comment-42-8"}
+
+
+@pytest.mark.asyncio
+async def test_bulk_dismiss_notifications_rejects_invalid_payloads(
+    async_client: AsyncClient,
+) -> None:
+    payload = make_user_payload("notif_bulk_invalid")
+    await register_and_login(async_client, payload)
+
+    empty_response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={"notification_ids": []},
+    )
+    assert empty_response.status_code == 422
+
+    invalid_id_response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={"notification_ids": ["invalid-id"]},
+    )
+    assert invalid_id_response.status_code == 422
+    assert invalid_id_response.json()["detail"] == "notification_id format is invalid"
+
+    too_many_ids = [
+        f"comment-10-{index + 1}"
+        for index in range(notification_dismissals.MAX_BULK_DISMISS_NOTIFICATIONS + 1)
+    ]
+    too_many_response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={"notification_ids": too_many_ids},
+    )
+    assert too_many_response.status_code == 422
+    assert "at most" in too_many_response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_bulk_dismiss_notifications_rejects_overlong_identifier(
+    async_client: AsyncClient,
+) -> None:
+    payload = make_user_payload("notif_bulk_overlong")
+    await register_and_login(async_client, payload)
+
+    overlong_notification_id = "comment-1-" + ("9" * 182)
+    response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={"notification_ids": [overlong_notification_id]},
+    )
+    assert response.status_code == 422
+
+    listed = await async_client.get("/api/v1/notifications/dismissed")
+    assert listed.status_code == 200
+    assert listed.json()["notification_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_bulk_dismiss_notifications_with_invalid_item_is_atomic(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    payload = make_user_payload("notif_bulk_atomic")
+    await register_and_login(async_client, payload)
+
+    response = await async_client.post(
+        "/api/v1/notifications/dismissed/bulk",
+        json={"notification_ids": ["comment-11-1", "invalid-id"]},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "notification_id format is invalid"
+
+    listed = await async_client.get("/api/v1/notifications/dismissed")
+    assert listed.status_code == 200
+    assert listed.json()["notification_ids"] == []
+
+    user = await get_user_by_username(db_session, payload["username"])
+    stored = await db_session.execute(
+        select(DismissedNotification).where(_eq(DismissedNotification.user_id, user.id))
+    )
+    assert stored.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_dismiss_notification_is_persisted_and_idempotent(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    payload = make_user_payload("notif")
+    await register_and_login(async_client, payload)
+
+    first = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": "comment-42-7"},
+    )
+    second = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": "comment-42-7"},
+    )
+    listed = await async_client.get("/api/v1/notifications/dismissed")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["notification_id"] == "comment-42-7"
+    assert second.json()["notification_id"] == "comment-42-7"
+    assert listed.status_code == 200
+    assert listed.json()["notification_ids"] == ["comment-42-7"]
+
+    result = await db_session.execute(
+        select(DismissedNotification)
+    )
+    stored = [
+        item
+        for item in result.scalars().all()
+        if item.notification_id == "comment-42-7"
+    ]
+    assert len(stored) == 1
+
+
+@pytest.mark.asyncio
+async def test_dismiss_notification_is_idempotent_under_concurrency(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    payload = make_user_payload("notif_concurrency")
+    await register_and_login(async_client, payload)
+
+    response_one, response_two = await asyncio.gather(
+        async_client.post(
+            "/api/v1/notifications/dismissed",
+            json={"notification_id": "comment-99-9"},
+        ),
+        async_client.post(
+            "/api/v1/notifications/dismissed",
+            json={"notification_id": "comment-99-9"},
+        ),
+    )
+    assert response_one.status_code == 200
+    assert response_two.status_code == 200
+
+    result = await db_session.execute(
+        select(DismissedNotification).where(
+            _eq(DismissedNotification.notification_id, "comment-99-9")
+        )
+    )
+    stored = result.scalars().all()
+    assert len(stored) == 1
+
+
+@pytest.mark.asyncio
+async def test_dismissed_notifications_are_user_scoped(
+    async_client: AsyncClient,
+) -> None:
+    user_one = make_user_payload("notif_one")
+    user_two = make_user_payload("notif_two")
+
+    await register_and_login(async_client, user_one)
+    dismiss_one = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": "like-88"},
+    )
+    assert dismiss_one.status_code == 200
+    await async_client.post("/api/v1/auth/logout")
+
+    await register_and_login(async_client, user_two)
+    dismiss_two = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": "comment-11-3"},
+    )
+    assert dismiss_two.status_code == 200
+    listed_two = await async_client.get("/api/v1/notifications/dismissed")
+    assert listed_two.status_code == 200
+    assert listed_two.json()["notification_ids"] == ["comment-11-3"]
+
+    await async_client.post("/api/v1/auth/logout")
+    await login(async_client, user_one)
+    listed_one = await async_client.get("/api/v1/notifications/dismissed")
+    assert listed_one.status_code == 200
+    assert listed_one.json()["notification_ids"] == ["like-88"]
+
+
+@pytest.mark.asyncio
+async def test_dismiss_notification_rejects_blank_identifier(
+    async_client: AsyncClient,
+) -> None:
+    payload = make_user_payload("notif_blank")
+    await register_and_login(async_client, payload)
+
+    response = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": "   "},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "notification_id must not be empty"
+
+
+@pytest.mark.asyncio
+async def test_dismiss_notification_rejects_invalid_identifier_format(
+    async_client: AsyncClient,
+) -> None:
+    payload = make_user_payload("notif_invalid")
+    await register_and_login(async_client, payload)
+
+    response = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": "invalid-id"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "notification_id format is invalid"
+
+
+@pytest.mark.asyncio
+async def test_dismiss_notification_rejects_malformed_like_and_follow_identifiers(
+    async_client: AsyncClient,
+) -> None:
+    payload = make_user_payload("notif_malformed")
+    await register_and_login(async_client, payload)
+
+    malformed_ids = [
+        "like-1-not-a-uuid",
+        "follow-not-a-uuid",
+        "comment-1-not-a-number",
+    ]
+    for notification_id in malformed_ids:
+        response = await async_client.post(
+            "/api/v1/notifications/dismissed",
+            json={"notification_id": notification_id},
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"] == "notification_id format is invalid"
+
+
+@pytest.mark.asyncio
+async def test_dismissed_notifications_are_capped_per_user(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = make_user_payload("notif_cap")
+    await register_and_login(async_client, payload)
+
+    cap = 5
+    monkeypatch.setattr(
+        notification_dismissals,
+        "MAX_DISMISSED_NOTIFICATIONS",
+        cap,
+    )
+
+    posted_ids = [f"comment-1-{idx + 1}" for idx in range(cap + 3)]
+    for notification_id in posted_ids:
+        response = await async_client.post(
+            "/api/v1/notifications/dismissed",
+            json={"notification_id": notification_id},
+        )
+        assert response.status_code == 200
+
+    listed = await async_client.get("/api/v1/notifications/dismissed")
+    assert listed.status_code == 200
+    listed_ids = listed.json()["notification_ids"]
+    assert len(listed_ids) == cap
+    assert set(listed_ids) == set(posted_ids[-cap:])
+
+
+@pytest.mark.asyncio
+async def test_dismissed_notifications_pruning_handles_large_backlog_without_errors(
+    async_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = make_user_payload("notif_backlog")
+    await register_and_login(async_client, payload)
+
+    cap = 20
+    monkeypatch.setattr(
+        notification_dismissals,
+        "MAX_DISMISSED_NOTIFICATIONS",
+        cap,
+    )
+    monkeypatch.setattr(
+        notification_dismissals,
+        "PRUNE_BATCH_SIZE",
+        7,
+    )
+
+    for idx in range(90):
+        response = await async_client.post(
+            "/api/v1/notifications/dismissed",
+            json={"notification_id": f"comment-2-{idx + 1}"},
+        )
+        assert response.status_code == 200
+
+    listed = await async_client.get("/api/v1/notifications/dismissed")
+    assert listed.status_code == 200
+    listed_ids = listed.json()["notification_ids"]
+    assert len(listed_ids) == cap
+    expected_ids = {f"comment-2-{idx + 1}" for idx in range(90 - cap, 90)}
+    assert set(listed_ids) == expected_ids
+
+
+@pytest.mark.asyncio
+async def test_dismissed_notifications_request_path_pruning_is_bounded(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = make_user_payload("notif_bounded")
+    await register_and_login(async_client, payload)
+    owner = await get_user_by_username(db_session, payload["username"])
+
+    cap = 5
+    prune_batch_size = 3
+    monkeypatch.setattr(
+        notification_dismissals,
+        "MAX_DISMISSED_NOTIFICATIONS",
+        cap,
+    )
+    monkeypatch.setattr(
+        notification_dismissals,
+        "PRUNE_BATCH_SIZE",
+        prune_batch_size,
+    )
+
+    base_time = datetime(2026, 2, 14, 20, 0, 0, tzinfo=timezone.utc)
+    for idx in range(20):
+        db_session.add(
+            DismissedNotification(
+                user_id=owner.id,
+                notification_id=f"comment-3-{idx + 1}",
+                dismissed_at=base_time + timedelta(seconds=idx),
+            )
+        )
+    await db_session.commit()
+
+    bind = db_session.bind
+    assert isinstance(bind, AsyncEngine)
+    bounded_query_count = 0
+
+    def _before_cursor_execute(
+        conn: object,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,
+    ) -> None:
+        del conn, cursor, parameters, context, executemany
+        nonlocal bounded_query_count
+        normalized = statement.lstrip().lower()
+        if "dismissed_notifications" in normalized:
+            bounded_query_count += 1
+
+    event.listen(bind.sync_engine, "before_cursor_execute", _before_cursor_execute)
+    try:
+        response = await async_client.post(
+            "/api/v1/notifications/dismissed",
+            json={"notification_id": "comment-3-21"},
+        )
+    finally:
+        event.remove(bind.sync_engine, "before_cursor_execute", _before_cursor_execute)
+
+    assert response.status_code == 200
+    assert bounded_query_count <= 8
+
+    count_result = await db_session.execute(
+        select(
+            cast(
+                Any,
+                func.count(cast(ColumnElement[int], DismissedNotification.id)),
+            )
+        ).where(
+            _eq(DismissedNotification.user_id, owner.id)
+        )
+    )
+    total = int(count_result.scalar_one() or 0)
+    assert total == 18
+
+
+@pytest.mark.asyncio
+async def test_maintenance_prune_reduces_user_backlog_to_cap(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    payload = make_user_payload("notif_maintenance")
+    await register_and_login(async_client, payload)
+    owner = await get_user_by_username(db_session, payload["username"])
+
+    base_time = datetime(2026, 2, 14, 21, 0, 0, tzinfo=timezone.utc)
+    for idx in range(25):
+        db_session.add(
+            DismissedNotification(
+                user_id=owner.id,
+                notification_id=f"comment-4-{idx + 1}",
+                dismissed_at=base_time + timedelta(seconds=idx),
+            )
+        )
+    await db_session.commit()
+
+    deleted_rows = await notification_dismissals.prune_dismissed_notifications_for_user(
+        db_session,
+        owner.id,
+        keep_limit=7,
+        batch_size=4,
+    )
+    assert deleted_rows == 18
+
+    listed = await async_client.get("/api/v1/notifications/dismissed?limit=30")
+    assert listed.status_code == 200
+    listed_ids = listed.json()["notification_ids"]
+    assert len(listed_ids) == 7
+    expected = [f"comment-4-{idx + 1}" for idx in range(25 - 7, 25)]
+    assert set(listed_ids) == set(expected)
+
+
+@pytest.mark.asyncio
+async def test_maintenance_prune_respects_max_deleted_budget(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    payload = make_user_payload("notif_budget")
+    await register_and_login(async_client, payload)
+    owner = await get_user_by_username(db_session, payload["username"])
+
+    base_time = datetime(2026, 2, 14, 21, 30, 0, tzinfo=timezone.utc)
+    for idx in range(25):
+        db_session.add(
+            DismissedNotification(
+                user_id=owner.id,
+                notification_id=f"comment-5-{idx + 1}",
+                dismissed_at=base_time + timedelta(seconds=idx),
+            )
+        )
+    await db_session.commit()
+
+    deleted_rows = await notification_dismissals.prune_dismissed_notifications_for_user(
+        db_session,
+        owner.id,
+        keep_limit=7,
+        batch_size=10,
+        max_deleted=5,
+    )
+    assert deleted_rows == 5
+
+    count_result = await db_session.execute(
+        select(
+            cast(
+                Any,
+                func.count(cast(ColumnElement[int], DismissedNotification.id)),
+            )
+        ).where(_eq(DismissedNotification.user_id, owner.id))
+    )
+    total = int(count_result.scalar_one() or 0)
+    assert total == 20
+
+
+@pytest.mark.asyncio
+async def test_notification_stream_requires_auth(async_client: AsyncClient) -> None:
+    response = await async_client.get("/api/v1/notifications/stream")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_notification_stream_includes_comment_like_and_follow_request_entries(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("stream_owner")
+    commenter_payload = make_user_payload("stream_commenter")
+    liker_payload = make_user_payload("stream_liker")
+    follower_payload = make_user_payload("stream_follower")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, commenter_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, liker_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, follower_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    commenter = await get_user_by_username(db_session, commenter_payload["username"])
+    liker = await get_user_by_username(db_session, liker_payload["username"])
+    follower = await get_user_by_username(db_session, follower_payload["username"])
+
+    base_time = datetime(2026, 2, 14, 10, 0, 0, tzinfo=timezone.utc)
+    post = Post(
+        author_id=owner.id,
+        image_key=f"posts/{owner.id}/stream.jpg",
+        caption="stream",
+        created_at=base_time,
+        updated_at=base_time,
+    )
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        raise ValueError("Post record missing identifier")
+
+    comment = Comment(
+        post_id=post.id,
+        author_id=commenter.id,
+        text="Salut",
+        created_at=base_time + timedelta(minutes=1),
+        updated_at=base_time + timedelta(minutes=1),
+    )
+    like = Like(
+        post_id=post.id,
+        user_id=liker.id,
+        created_at=base_time + timedelta(minutes=2),
+        updated_at=base_time + timedelta(minutes=2),
+    )
+    follow_request = FollowRequest(
+        requester_id=follower.id,
+        target_id=owner.id,
+        created_at=base_time + timedelta(minutes=3),
+        updated_at=base_time + timedelta(minutes=3),
+    )
+    db_session.add(comment)
+    db_session.add(like)
+    db_session.add(follow_request)
+    await db_session.commit()
+    await db_session.refresh(comment)
+    if comment.id is None:  # pragma: no cover - defensive
+        raise ValueError("Comment record missing identifier")
+
+    await login(async_client, owner_payload)
+    response = await async_client.get("/api/v1/notifications/stream")
+    assert response.status_code == 200
+    payload = response.json()
+
+    notifications = payload["notifications"]
+    follow_requests = payload["follow_requests"]
+
+    expected_comment_id = f"comment-{post.id}-{comment.id}"
+    expected_like_id = f"like-{post.id}-{liker.id}"
+    expected_follow_id = f"follow-{follower.id}"
+
+    assert any(
+        item["id"] == expected_comment_id and item["kind"] == "comment"
+        for item in notifications
+    )
+    assert any(
+        item["id"] == expected_like_id
+        and item["kind"] == "like"
+        and item["username"] == liker.username
+        for item in notifications
+    )
+    assert any(
+        item["id"] == expected_follow_id and item["username"] == follower.username
+        for item in follow_requests
+    )
+    assert payload["total_count"] == len(notifications) + len(follow_requests)
+
+
+@pytest.mark.asyncio
+async def test_follow_request_sent_via_follow_endpoint_appears_in_notifications(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("fr_ep_owner")
+    requester_payload = make_user_payload("fr_ep_actor")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, requester_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    owner.is_private = True
+    db_session.add(owner)
+    await db_session.commit()
+
+    await login(async_client, requester_payload)
+    follow_response = await async_client.post(
+        f"/api/v1/users/{owner_payload['username']}/follow"
+    )
+    assert follow_response.status_code == 200
+    assert follow_response.json()["state"] == "requested"
+
+    await async_client.post("/api/v1/auth/logout")
+    await login(async_client, owner_payload)
+
+    stream = await async_client.get("/api/v1/notifications/stream")
+    assert stream.status_code == 200
+    payload = stream.json()
+    requester = await get_user_by_username(db_session, requester_payload["username"])
+    expected_follow_id = f"follow-{requester.id}"
+    assert any(
+        item["id"] == expected_follow_id
+        and item["username"] == requester_payload["username"]
+        for item in payload["follow_requests"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_follow_request_notification_can_be_dismissed(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("follow_dismiss_owner")
+    follower_payload = make_user_payload("follow_dismiss_actor")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, follower_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    follower = await get_user_by_username(db_session, follower_payload["username"])
+
+    follow_time = datetime(2026, 2, 14, 14, 0, 0, tzinfo=timezone.utc)
+    db_session.add(
+        FollowRequest(
+            requester_id=follower.id,
+            target_id=owner.id,
+            created_at=follow_time,
+            updated_at=follow_time,
+        )
+    )
+    await db_session.commit()
+
+    await login(async_client, owner_payload)
+    follow_id = f"follow-{follower.id}"
+
+    initial_stream = await async_client.get("/api/v1/notifications/stream")
+    assert initial_stream.status_code == 200
+    assert any(
+        item["id"] == follow_id for item in initial_stream.json()["follow_requests"]
+    )
+
+    dismiss_response = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": follow_id},
+    )
+    assert dismiss_response.status_code == 200
+
+    hidden_stream = await async_client.get("/api/v1/notifications/stream")
+    assert hidden_stream.status_code == 200
+    assert all(
+        item["id"] != follow_id for item in hidden_stream.json()["follow_requests"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_follow_request_notification_reappears_after_new_request_event(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("follow_reopen_owner")
+    follower_payload = make_user_payload("follow_reopen_actor")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, follower_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    follower = await get_user_by_username(db_session, follower_payload["username"])
+
+    now_utc = datetime.now(tz=timezone.utc)
+    first_follow_request_time = now_utc - timedelta(minutes=10)
+    db_session.add(
+        FollowRequest(
+            requester_id=follower.id,
+            target_id=owner.id,
+            created_at=first_follow_request_time,
+            updated_at=first_follow_request_time,
+        )
+    )
+    await db_session.commit()
+
+    await login(async_client, owner_payload)
+    follow_id = f"follow-{follower.id}"
+
+    dismiss_response = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": follow_id},
+    )
+    assert dismiss_response.status_code == 200
+
+    hidden_stream = await async_client.get("/api/v1/notifications/stream")
+    assert hidden_stream.status_code == 200
+    assert all(
+        item["id"] != follow_id for item in hidden_stream.json()["follow_requests"]
+    )
+
+    await db_session.execute(
+        delete(FollowRequest).where(
+            _eq(FollowRequest.requester_id, follower.id),
+            _eq(FollowRequest.target_id, owner.id),
+        )
+    )
+    second_follow_request_time = now_utc + timedelta(minutes=1)
+    db_session.add(
+        FollowRequest(
+            requester_id=follower.id,
+            target_id=owner.id,
+            created_at=second_follow_request_time,
+            updated_at=second_follow_request_time,
+        )
+    )
+    await db_session.commit()
+
+    visible_stream = await async_client.get("/api/v1/notifications/stream")
+    assert visible_stream.status_code == 200
+    assert any(
+        item["id"] == follow_id for item in visible_stream.json()["follow_requests"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_notification_stream_query_count_is_constant(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("cnt_owner")
+    commenter_payload = make_user_payload("cnt_comment")
+    liker_payload = make_user_payload("cnt_liker")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, commenter_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, liker_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    commenter = await get_user_by_username(db_session, commenter_payload["username"])
+    liker = await get_user_by_username(db_session, liker_payload["username"])
+
+    base_time = datetime(2026, 2, 14, 11, 0, 0, tzinfo=timezone.utc)
+    post = Post(
+        author_id=owner.id,
+        image_key=f"posts/{owner.id}/stream-count.jpg",
+        caption="stream-count",
+        created_at=base_time,
+        updated_at=base_time,
+    )
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        raise ValueError("Post record missing identifier")
+
+    db_session.add(
+        Comment(
+            post_id=post.id,
+            author_id=commenter.id,
+            text="count-comment",
+            created_at=base_time + timedelta(minutes=1),
+            updated_at=base_time + timedelta(minutes=1),
+        )
+    )
+    db_session.add(
+        Like(
+            post_id=post.id,
+            user_id=liker.id,
+            created_at=base_time + timedelta(minutes=2),
+            updated_at=base_time + timedelta(minutes=2),
+        )
+    )
+    await db_session.commit()
+
+    await login(async_client, owner_payload)
+
+    bind = db_session.bind
+    assert isinstance(bind, AsyncEngine)
+    stream_select_count = 0
+
+    def _before_cursor_execute(
+        conn: object,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,
+    ) -> None:
+        del conn, cursor, parameters, context, executemany
+        nonlocal stream_select_count
+        normalized = statement.lstrip().lower()
+        if not normalized.startswith("select"):
+            return
+        if (
+            " comments" in normalized
+            or " likes" in normalized
+            or " dismissed_notifications" in normalized
+            or " follows" in normalized
+        ):
+            stream_select_count += 1
+
+    event.listen(bind.sync_engine, "before_cursor_execute", _before_cursor_execute)
+    try:
+        response = await async_client.get("/api/v1/notifications/stream?limit=16")
+    finally:
+        event.remove(bind.sync_engine, "before_cursor_execute", _before_cursor_execute)
+
+    assert response.status_code == 200
+    assert stream_select_count <= 2
+
+
+@pytest.mark.asyncio
+async def test_like_notification_reappears_after_new_like_event(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("like_owner")
+    liker_payload = make_user_payload("like_actor")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, liker_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    liker = await get_user_by_username(db_session, liker_payload["username"])
+
+    post = Post(
+        author_id=owner.id,
+        image_key=f"posts/{owner.id}/like.jpg",
+        caption="like-test",
+    )
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        raise ValueError("Post record missing identifier")
+
+    first_like = Like(
+        post_id=post.id,
+        user_id=liker.id,
+    )
+    db_session.add(first_like)
+    await db_session.commit()
+
+    await login(async_client, owner_payload)
+    initial_stream = await async_client.get("/api/v1/notifications/stream")
+    assert initial_stream.status_code == 200
+    initial_payload = initial_stream.json()
+    notification_id = f"like-{post.id}-{liker.id}"
+    assert any(
+        item["id"] == notification_id and item["kind"] == "like"
+        for item in initial_payload["notifications"]
+    )
+
+    dismiss_response = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": notification_id},
+    )
+    assert dismiss_response.status_code == 200
+
+    after_dismiss = await async_client.get("/api/v1/notifications/stream")
+    assert after_dismiss.status_code == 200
+    assert all(
+        item["id"] != notification_id for item in after_dismiss.json()["notifications"]
+    )
+
+    await db_session.execute(
+        delete(Like).where(
+            _eq(Like.user_id, liker.id),
+            _eq(Like.post_id, post.id),
+        )
+    )
+    newer_like_time = datetime.now(tz=timezone.utc) + timedelta(minutes=1)
+    second_like = Like(
+        post_id=post.id,
+        user_id=liker.id,
+        created_at=newer_like_time,
+        updated_at=newer_like_time,
+    )
+    db_session.add(second_like)
+    await db_session.commit()
+
+    after_new_like = await async_client.get("/api/v1/notifications/stream")
+    assert after_new_like.status_code == 200
+    assert any(
+        item["id"] == notification_id and item["kind"] == "like"
+        for item in after_new_like.json()["notifications"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_backfills_when_newest_notifications_are_dismissed(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("backfill_owner")
+    commenter_payload = make_user_payload("backfill_commenter")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, commenter_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    commenter = await get_user_by_username(db_session, commenter_payload["username"])
+
+    base_time = datetime(2026, 2, 14, 12, 0, 0, tzinfo=timezone.utc)
+    post = Post(
+        author_id=owner.id,
+        image_key=f"posts/{owner.id}/backfill.jpg",
+        caption="backfill",
+        created_at=base_time,
+        updated_at=base_time,
+    )
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        raise ValueError("Post record missing identifier")
+
+    older = Comment(
+        post_id=post.id,
+        author_id=commenter.id,
+        text="older",
+        created_at=base_time + timedelta(minutes=1),
+        updated_at=base_time + timedelta(minutes=1),
+    )
+    newer = Comment(
+        post_id=post.id,
+        author_id=commenter.id,
+        text="newer",
+        created_at=base_time + timedelta(minutes=2),
+        updated_at=base_time + timedelta(minutes=2),
+    )
+    newest = Comment(
+        post_id=post.id,
+        author_id=commenter.id,
+        text="newest",
+        created_at=base_time + timedelta(minutes=3),
+        updated_at=base_time + timedelta(minutes=3),
+    )
+    db_session.add(older)
+    db_session.add(newer)
+    db_session.add(newest)
+    await db_session.commit()
+    await db_session.refresh(older)
+    await db_session.refresh(newer)
+    await db_session.refresh(newest)
+    if older.id is None or newer.id is None or newest.id is None:  # pragma: no cover - defensive
+        raise ValueError("Comment record missing identifier")
+
+    await login(async_client, owner_payload)
+    dismiss_newest = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": f"comment-{post.id}-{newest.id}"},
+    )
+    dismiss_newer = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": f"comment-{post.id}-{newer.id}"},
+    )
+    assert dismiss_newest.status_code == 200
+    assert dismiss_newer.status_code == 200
+
+    stream = await async_client.get("/api/v1/notifications/stream?limit=1")
+    assert stream.status_code == 200
+    payload = stream.json()
+    assert len(payload["notifications"]) == 1
+    notification = payload["notifications"][0]
+    assert notification["id"] == f"comment-{post.id}-{older.id}"
+    assert notification["kind"] == "comment"
+    assert notification["username"] == commenter.username
+    assert notification["message"] == "a commente votre publication"
+    assert notification["href"] == f"/posts/{post.id}"
+    assert notification["occurred_at"].startswith("2026-02-14T12:01:00")
+
+
+@pytest.mark.asyncio
+async def test_stream_backfills_beyond_large_dismissed_window(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("window_owner")
+    commenter_payload = make_user_payload("window_commenter")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, commenter_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    commenter = await get_user_by_username(db_session, commenter_payload["username"])
+
+    base_time = datetime(2026, 2, 14, 13, 0, 0, tzinfo=timezone.utc)
+    post = Post(
+        author_id=owner.id,
+        image_key=f"posts/{owner.id}/dismissed-window.jpg",
+        caption="dismissed-window",
+        created_at=base_time,
+        updated_at=base_time,
+    )
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        raise ValueError("Post record missing identifier")
+
+    total_comments = 560
+    dismissed_comments = 540
+    for idx in range(total_comments):
+        event_time = base_time + timedelta(seconds=idx)
+        db_session.add(
+            Comment(
+                post_id=post.id,
+                author_id=commenter.id,
+                text=f"bulk-{idx}",
+                created_at=event_time,
+                updated_at=event_time,
+            )
+        )
+    await db_session.commit()
+
+    comment_id_column = cast(ColumnElement[int], Comment.id)
+    comment_created_at_column = cast(ColumnElement[datetime], Comment.created_at)
+    comments_result = await db_session.execute(
+        select(comment_id_column, comment_created_at_column)
+        .where(_eq(Comment.post_id, post.id))
+        .order_by(
+            cast(Any, Comment.created_at).desc(),
+            cast(Any, Comment.id).desc(),
+        )
+    )
+    ordered_comments = comments_result.all()
+    assert len(ordered_comments) == total_comments
+
+    for comment_id, created_at in ordered_comments[:dismissed_comments]:
+        db_session.add(
+            DismissedNotification(
+                user_id=owner.id,
+                notification_id=f"comment-{post.id}-{comment_id}",
+                dismissed_at=created_at + timedelta(seconds=1),
+            )
+        )
+    await db_session.commit()
+
+    expected_comment_id = ordered_comments[dismissed_comments][0]
+
+    await login(async_client, owner_payload)
+    stream = await async_client.get("/api/v1/notifications/stream?limit=1")
+    assert stream.status_code == 200
+    payload = stream.json()
+    assert len(payload["notifications"]) == 1
+    assert payload["notifications"][0]["id"] == f"comment-{post.id}-{expected_comment_id}"
+
+
+@pytest.mark.asyncio
+async def test_legacy_like_dismissal_id_remains_effective_for_new_like_ids(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("legacy_like_owner")
+    liker_payload = make_user_payload("legacy_like_actor")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, liker_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    liker = await get_user_by_username(db_session, liker_payload["username"])
+
+    now_utc = datetime.now(tz=timezone.utc)
+    base_time = now_utc - timedelta(minutes=10)
+    post = Post(
+        author_id=owner.id,
+        image_key=f"posts/{owner.id}/legacy-like.jpg",
+        caption="legacy-like",
+        created_at=base_time,
+        updated_at=base_time,
+    )
+    db_session.add(post)
+    await db_session.commit()
+    await db_session.refresh(post)
+    if post.id is None:  # pragma: no cover - defensive
+        raise ValueError("Post record missing identifier")
+
+    initial_like_time = base_time + timedelta(minutes=1)
+    first_like = Like(
+        post_id=post.id,
+        user_id=liker.id,
+        created_at=initial_like_time,
+        updated_at=initial_like_time,
+    )
+    db_session.add(first_like)
+    await db_session.commit()
+
+    await login(async_client, owner_payload)
+    legacy_dismiss_response = await async_client.post(
+        "/api/v1/notifications/dismissed",
+        json={"notification_id": f"like-{post.id}"},
+    )
+    assert legacy_dismiss_response.status_code == 200
+
+    hidden_stream = await async_client.get("/api/v1/notifications/stream")
+    assert hidden_stream.status_code == 200
+    assert all(
+        item["id"] != f"like-{post.id}-{liker.id}"
+        for item in hidden_stream.json()["notifications"]
+    )
+
+    await db_session.execute(
+        delete(Like).where(
+            _eq(Like.user_id, liker.id),
+            _eq(Like.post_id, post.id),
+        )
+    )
+    newer_like_time = now_utc + timedelta(minutes=1)
+    second_like = Like(
+        post_id=post.id,
+        user_id=liker.id,
+        created_at=newer_like_time,
+        updated_at=newer_like_time,
+    )
+    db_session.add(second_like)
+    await db_session.commit()
+
+    visible_stream = await async_client.get("/api/v1/notifications/stream")
+    assert visible_stream.status_code == 200
+    assert any(
+        item["id"] == f"like-{post.id}-{liker.id}" and item["kind"] == "like"
+        for item in visible_stream.json()["notifications"]
+    )

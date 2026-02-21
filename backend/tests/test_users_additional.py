@@ -66,14 +66,16 @@ async def test_follow_and_unfollow_direct(db_session):
         current_user=follower,
         session=db_session,
     )
-    assert follow_result["detail"] == "Followed"
+    assert follow_result.detail == "Followed"
+    assert follow_result.state == "following"
 
     unfollow_result = await users.unfollow_user(
         followee.username,
         current_user=follower,
         session=db_session,
     )
-    assert unfollow_result["detail"] == "Unfollowed"
+    assert unfollow_result.detail == "Unfollowed"
+    assert unfollow_result.state == "none"
 
 
 @pytest.mark.asyncio
@@ -97,7 +99,8 @@ async def test_follow_user_handles_unique_violation_on_commit(db_session, monkey
         current_user=follower,
         session=db_session,
     )
-    assert result["detail"] == "Already following"
+    assert result.detail == "Already following"
+    assert result.state == "following"
 
 
 @pytest.mark.asyncio
@@ -116,6 +119,7 @@ async def test_list_followers_and_following(db_session):
         alice.username,
         response=Response(),
         session=db_session,
+        current_user=alice,
     )
     assert [item.username for item in followers] == ["bob"]
 
@@ -123,5 +127,6 @@ async def test_list_followers_and_following(db_session):
         alice.username,
         response=Response(),
         session=db_session,
+        current_user=alice,
     )
     assert [item.username for item in following] == ["charlie"]

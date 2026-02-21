@@ -11,7 +11,9 @@ class Follow(SQLModel, table=True):
     """Represents a follower/followee relationship."""
 
     __tablename__ = "follows"
-    __table_args__ = (Index("ix_follows_followee_id", "followee_id"),)
+    __table_args__ = (
+        Index("ix_follows_followee_created_at", "followee_id", "created_at"),
+    )
 
     follower_id: str = Field(
         sa_column=Column(

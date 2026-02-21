@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from io import BytesIO
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, NoReturn, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
@@ -17,12 +18,26 @@ from sqlalchemy.sql import ColumnElement
 from api.deps import get_current_user, get_db
 from core import settings
 from db.errors import is_unique_violation
-from models import Follow, Post, User
+from models import Follow, FollowRequest, Post, User, UserBlock
 from .pagination import MAX_PAGE_SIZE, set_next_offset_header
 from .post_views import collect_like_meta
+from services.account_privacy import (
+    can_view_account_content,
+    is_follow_request_pending,
+    is_following,
+)
+from services.auth import DEFAULT_AVATAR_OBJECT_KEY
+from services.account_blocks import (
+    BlockState,
+    apply_user_block,
+    build_not_blocked_either_direction_filter,
+    get_block_state,
+    remove_user_block,
+)
 from services import (
     JPEG_CONTENT_TYPE,
     UploadTooLargeError,
+    delete_object,
     ensure_bucket,
     get_minio_client,
     process_image_bytes,
@@ -31,6 +46,8 @@ from services import (
 
 router = APIRouter(tags=["users"])
 MAX_PROFILE_NAME_LENGTH = 80
+MAX_PROFILE_BIO_LENGTH = 120
+logger = logging.getLogger(__name__)
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -47,6 +64,79 @@ def _is_not_null(column: Any) -> ColumnElement[bool]:
 
 def _desc(column: Any) -> Any:
     return cast(Any, column).desc()
+
+
+async def _find_user_by_username(
+    session: AsyncSession,
+    username: str,
+) -> User | None:
+    result = await session.execute(select(User).where(_eq(User.username, username)))
+    return result.scalar_one_or_none()
+
+
+def _require_user_id(user: User, *, detail: str) -> str:
+    if user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=detail,
+        )
+    return user.id
+
+
+def _raise_user_not_found() -> NoReturn:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="User not found",
+    )
+
+
+async def _resolve_target_user_context(
+    session: AsyncSession,
+    *,
+    current_user: User,
+    username: str,
+) -> tuple[User, str, str, BlockState]:
+    target_user = await _find_user_by_username(session, username)
+    if target_user is None:
+        _raise_user_not_found()
+
+    viewer_id = _require_user_id(
+        current_user,
+        detail="User record missing identifier",
+    )
+    target_user_id = _require_user_id(
+        target_user,
+        detail="User record missing identifier",
+    )
+    if viewer_id == target_user_id:
+        return target_user, viewer_id, target_user_id, BlockState(
+            is_blocked=False,
+            is_blocked_by=False,
+        )
+
+    block_state = await get_block_state(
+        session,
+        viewer_id=viewer_id,
+        target_id=target_user_id,
+    )
+    return target_user, viewer_id, target_user_id, block_state
+
+
+async def _can_view_target_content(
+    session: AsyncSession,
+    *,
+    viewer: User,
+    target: User,
+) -> bool:
+    viewer_id = _require_user_id(
+        viewer,
+        detail="User record missing identifier",
+    )
+    return await can_view_account_content(
+        session,
+        viewer_id=viewer_id,
+        account=target,
+    )
 
 
 def _upload_avatar_bytes(
@@ -73,6 +163,7 @@ class UserProfilePublic(BaseModel):
     name: str | None = None
     bio: str | None = None
     avatar_key: str | None = None
+    is_private: bool = False
 
 
 class UserProfilePrivate(UserProfilePublic):
@@ -89,6 +180,20 @@ class UserPostSummary(BaseModel):
 
 class FollowStatusResponse(BaseModel):
     is_following: bool
+    is_requested: bool = False
+    is_private: bool = False
+    is_blocked: bool = False
+    is_blocked_by: bool = False
+
+
+class FollowMutationResponse(BaseModel):
+    detail: str
+    state: Literal["none", "following", "requested"]
+
+
+class BlockMutationResponse(BaseModel):
+    detail: str
+    blocked: bool
 
 
 @router.get("/users/search", response_model=list[UserProfilePublic])
@@ -124,7 +229,14 @@ async def search_users(
     )
 
     if current_user.id is not None:
-        stmt = stmt.where(~_eq(User.id, current_user.id))
+        viewer_id = current_user.id
+        stmt = stmt.where(
+            ~_eq(User.id, viewer_id),
+            build_not_blocked_either_direction_filter(
+                viewer_id=viewer_id,
+                candidate_user_id_column=cast(ColumnElement[str], User.id),
+            ),
+        )
 
     result = await session.execute(stmt)
     users = result.scalars().all()
@@ -135,12 +247,16 @@ async def search_users(
 async def get_user_profile(
     username: str,
     session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> UserProfilePublic:
     """Fetch a user's public profile."""
-    result = await session.execute(select(User).where(_eq(User.username, username)))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user, _viewer_id, _target_user_id, block_state = await _resolve_target_user_context(
+        session,
+        current_user=current_user,
+        username=username,
+    )
+    if block_state.is_blocked_by:
+        _raise_user_not_found()
     return UserProfilePublic.model_validate(user)
 
 
@@ -150,16 +266,55 @@ async def get_me(current_user: User = Depends(get_current_user)) -> UserProfileP
     return UserProfilePrivate.model_validate(current_user)
 
 
+@router.get("/me/blocked-users", response_model=list[UserProfilePublic])
+async def list_blocked_users(
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[UserProfilePublic]:
+    current_user_id = _require_user_id(
+        current_user,
+        detail="User record missing identifier",
+    )
+
+    blocked_query = (
+        select(User)
+        .join(UserBlock, _eq(UserBlock.blocked_id, User.id))
+        .where(_eq(UserBlock.blocker_id, current_user_id))
+        .order_by(User.username, User.id)
+    )
+    if offset > 0:
+        blocked_query = blocked_query.offset(offset)
+    if limit is not None:
+        blocked_query = blocked_query.limit(limit + 1)
+
+    blocked_result = await session.execute(blocked_query)
+    blocked_users = blocked_result.scalars().all()
+    if limit is not None:
+        has_more = len(blocked_users) > limit
+        if has_more:
+            blocked_users = blocked_users[:limit]
+        set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
+    return [UserProfilePublic.model_validate(user) for user in blocked_users]
+
+
 @router.patch("/me", response_model=UserProfilePrivate)
 async def update_me(
     name: str | None = Form(default=None),
     bio: str | None = Form(default=None),
     avatar: UploadFile | None = File(default=None),
+    is_private: Annotated[bool | None, Form()] = None,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> UserProfilePrivate:
     """Update the authenticated user's profile."""
     updated = False
+    uploaded_avatar_key: str | None = None
+    previous_avatar_key = current_user.avatar_key
+    previous_is_private = current_user.is_private
 
     if name is not None:
         normalized_name = name.strip()
@@ -172,13 +327,25 @@ async def update_me(
         updated = True
     if bio is not None:
         normalized_bio = bio.strip()
+        if len(normalized_bio) > MAX_PROFILE_BIO_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Bio must be at most {MAX_PROFILE_BIO_LENGTH} characters",
+            )
         current_user.bio = normalized_bio or None
+        updated = True
+
+    if is_private is not None:
+        current_user.is_private = is_private
         updated = True
 
     if avatar is not None:
         try:
             data = await read_upload_file(avatar, settings.upload_max_bytes)
-            processed_bytes, processed_content_type = process_image_bytes(data)
+            processed_bytes, processed_content_type = await asyncio.to_thread(
+                process_image_bytes,
+                data,
+            )
         except UploadTooLargeError as exc:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -199,12 +366,54 @@ async def update_me(
         )
 
         current_user.avatar_key = object_key
+        uploaded_avatar_key = object_key
         updated = True
 
     if updated:
+        if previous_is_private and not current_user.is_private:
+            current_user_id = _require_user_id(
+                current_user,
+                detail="User record missing identifier",
+            )
+            await session.execute(
+                delete(FollowRequest).where(
+                    _eq(FollowRequest.target_id, current_user_id),
+                )
+            )
         session.add(current_user)
-        await session.commit()
+        try:
+            await session.commit()
+        except Exception as exc:
+            await session.rollback()
+            if uploaded_avatar_key is not None:
+                try:
+                    await asyncio.to_thread(delete_object, uploaded_avatar_key)
+                except Exception as cleanup_error:
+                    logger.warning(
+                        "Failed to cleanup uploaded avatar after profile update commit failure",
+                        extra={"avatar_key": uploaded_avatar_key},
+                        exc_info=cleanup_error,
+                    )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update profile",
+            ) from exc
         await session.refresh(current_user)
+        if (
+            uploaded_avatar_key is not None
+            and previous_avatar_key is not None
+            and previous_avatar_key != uploaded_avatar_key
+            and previous_avatar_key != DEFAULT_AVATAR_OBJECT_KEY
+            and not previous_avatar_key.startswith("avatars/default/")
+        ):
+            try:
+                await asyncio.to_thread(delete_object, previous_avatar_key)
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Failed to cleanup replaced avatar object after profile update",
+                    extra={"avatar_key": previous_avatar_key},
+                    exc_info=cleanup_error,
+                )
 
     return UserProfilePrivate.model_validate(current_user)
 
@@ -219,29 +428,32 @@ async def list_user_posts(
     session: AsyncSession = Depends(get_db),
 ) -> list[UserPostSummary]:
     """Return posts authored by the specified user when visible to the viewer."""
-    result = await session.execute(select(User).where(_eq(User.username, username)))
-    author = result.scalar_one_or_none()
+    author = await _find_user_by_username(session, username)
     if author is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    if current_user.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
-    if author.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Target user record missing identifier",
-        )
+    viewer_id = _require_user_id(
+        current_user,
+        detail="User record missing identifier",
+    )
+    author_id = _require_user_id(
+        author,
+        detail="Target user record missing identifier",
+    )
 
-    viewer_id = current_user.id
+    can_view = await _can_view_target_content(
+        session,
+        viewer=current_user,
+        target=author,
+    )
+    if not can_view:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     post_created_at = cast(Any, Post.created_at)
     post_id_column = cast(Any, Post.id)
     posts_query = (
         select(Post)
-        .where(_eq(Post.author_id, author.id))
+        .where(_eq(Post.author_id, author_id))
         .order_by(
             _desc(post_created_at),
             _desc(post_id_column),
@@ -279,72 +491,200 @@ async def list_user_posts(
     return summaries
 
 
-@router.post("/users/{username}/follow", status_code=status.HTTP_200_OK)
+@router.post(
+    "/users/{username}/block",
+    response_model=BlockMutationResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def block_user(
+    username: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> BlockMutationResponse:
+    if username == current_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot block yourself",
+        )
+
+    _target_user, blocker_id, blocked_id, block_state = await _resolve_target_user_context(
+        session,
+        current_user=current_user,
+        username=username,
+    )
+    if block_state.is_blocked_by and not block_state.is_blocked:
+        _raise_user_not_found()
+
+    created = await apply_user_block(
+        session,
+        blocker_id=blocker_id,
+        blocked_id=blocked_id,
+    )
+    return BlockMutationResponse(
+        detail="User blocked" if created else "Already blocked",
+        blocked=True,
+    )
+
+
+@router.delete(
+    "/users/{username}/block",
+    response_model=BlockMutationResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def unblock_user(
+    username: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> BlockMutationResponse:
+    if username == current_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot unblock yourself",
+        )
+
+    _target_user, blocker_id, blocked_id, block_state = await _resolve_target_user_context(
+        session,
+        current_user=current_user,
+        username=username,
+    )
+    if block_state.is_blocked_by and not block_state.is_blocked:
+        _raise_user_not_found()
+
+    removed = await remove_user_block(
+        session,
+        blocker_id=blocker_id,
+        blocked_id=blocked_id,
+    )
+    return BlockMutationResponse(
+        detail="User unblocked" if removed else "User was not blocked",
+        blocked=False,
+    )
+
+
+@router.post(
+    "/users/{username}/follow",
+    response_model=FollowMutationResponse,
+    status_code=status.HTTP_200_OK,
+)
 async def follow_user(
     username: str,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
+) -> FollowMutationResponse:
     if username == current_user.username:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot follow yourself")
 
-    result = await session.execute(select(User).where(_eq(User.username, username)))
-    followee = result.scalar_one_or_none()
-    if followee is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    if current_user.id is None or followee.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
-
-    existing = await session.execute(
-        select(Follow).where(
-            _eq(Follow.follower_id, current_user.id),
-            _eq(Follow.followee_id, followee.id),
-        )
+    followee, follower_id, followee_id, block_state = await _resolve_target_user_context(
+        session,
+        current_user=current_user,
+        username=username,
     )
-    if existing.scalar_one_or_none() is not None:
-        return {"detail": "Already following"}
+    if block_state.is_blocked_by:
+        _raise_user_not_found()
+    if block_state.is_blocked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot follow this user",
+        )
 
-    follow = Follow(follower_id=current_user.id, followee_id=followee.id)
-    session.add(follow)
+    if await is_following(
+        session,
+        follower_id=follower_id,
+        followee_id=followee_id,
+    ):
+        return FollowMutationResponse(detail="Already following", state="following")
+
+    has_pending_request = await is_follow_request_pending(
+        session,
+        requester_id=follower_id,
+        target_id=followee_id,
+    )
+
+    if followee.is_private:
+        if has_pending_request:
+            return FollowMutationResponse(detail="Follow request pending", state="requested")
+
+        session.add(FollowRequest(requester_id=follower_id, target_id=followee_id))
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            await session.rollback()
+            if is_unique_violation(exc):
+                return FollowMutationResponse(detail="Follow request pending", state="requested")
+            raise
+        return FollowMutationResponse(detail="Follow request sent", state="requested")
+
+    if has_pending_request:
+        await session.execute(
+            delete(FollowRequest).where(
+                _eq(FollowRequest.requester_id, follower_id),
+                _eq(FollowRequest.target_id, followee_id),
+            )
+        )
+
+    session.add(Follow(follower_id=follower_id, followee_id=followee_id))
     try:
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
         if is_unique_violation(exc):
-            return {"detail": "Already following"}
+            return FollowMutationResponse(detail="Already following", state="following")
         raise
-    return {"detail": "Followed"}
+    return FollowMutationResponse(detail="Followed", state="following")
 
 
-@router.delete("/users/{username}/follow", status_code=status.HTTP_200_OK)
+@router.delete(
+    "/users/{username}/follow",
+    response_model=FollowMutationResponse,
+    status_code=status.HTTP_200_OK,
+)
 async def unfollow_user(
     username: str,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    result = await session.execute(select(User).where(_eq(User.username, username)))
-    followee = result.scalar_one_or_none()
-    if followee is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    if current_user.id is None or followee.id is None:
+) -> FollowMutationResponse:
+    _followee, follower_id, followee_id, block_state = await _resolve_target_user_context(
+        session,
+        current_user=current_user,
+        username=username,
+    )
+    if block_state.is_blocked_by:
+        _raise_user_not_found()
+    if block_state.is_blocked:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot modify follow relationship for this user",
         )
+
+    follow_deleted = await is_following(
+        session,
+        follower_id=follower_id,
+        followee_id=followee_id,
+    )
+    request_deleted = await is_follow_request_pending(
+        session,
+        requester_id=follower_id,
+        target_id=followee_id,
+    )
 
     await session.execute(
         delete(Follow).where(
-            _eq(Follow.follower_id, current_user.id),
-            _eq(Follow.followee_id, followee.id),
+            _eq(Follow.follower_id, follower_id),
+            _eq(Follow.followee_id, followee_id),
+        )
+    )
+    await session.execute(
+        delete(FollowRequest).where(
+            _eq(FollowRequest.requester_id, follower_id),
+            _eq(FollowRequest.target_id, followee_id),
         )
     )
     await session.commit()
-    return {"detail": "Unfollowed"}
+    if follow_deleted:
+        return FollowMutationResponse(detail="Unfollowed", state="none")
+    if request_deleted:
+        return FollowMutationResponse(detail="Follow request cancelled", state="none")
+    return FollowMutationResponse(detail="Not following", state="none")
 
 
 @router.get("/users/{username}/follow-status", response_model=FollowStatusResponse)
@@ -353,30 +693,47 @@ async def get_follow_status(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> FollowStatusResponse:
-    result = await session.execute(select(User).where(_eq(User.username, username)))
-    target_user = result.scalar_one_or_none()
-    if target_user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    target_user, viewer_id, target_id, block_state = await _resolve_target_user_context(
+        session,
+        current_user=current_user,
+        username=username,
+    )
 
-    if current_user.id is None or target_user.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
-
-    is_following = False
-    if current_user.id != target_user.id:
-        follow_result = await session.execute(
-            select(Follow)
-            .where(
-                _eq(Follow.follower_id, current_user.id),
-                _eq(Follow.followee_id, target_user.id),
+    following_status = False
+    is_requested = False
+    is_blocked = block_state.is_blocked
+    is_blocked_by = block_state.is_blocked_by
+    if viewer_id != target_id:
+        if is_blocked_by:
+            _raise_user_not_found()
+        if is_blocked:
+            return FollowStatusResponse(
+                is_following=False,
+                is_requested=False,
+                is_private=target_user.is_private,
+                is_blocked=True,
+                is_blocked_by=False,
             )
-            .limit(1)
-        )
-        is_following = follow_result.scalar_one_or_none() is not None
 
-    return FollowStatusResponse(is_following=is_following)
+        following_status = await is_following(
+            session,
+            follower_id=viewer_id,
+            followee_id=target_id,
+        )
+        if target_user.is_private and not following_status:
+            is_requested = await is_follow_request_pending(
+                session,
+                requester_id=viewer_id,
+                target_id=target_id,
+            )
+
+    return FollowStatusResponse(
+        is_following=following_status,
+        is_requested=is_requested,
+        is_private=target_user.is_private,
+        is_blocked=is_blocked,
+        is_blocked_by=is_blocked_by,
+    )
 
 
 @router.get("/users/{username}/followers", response_model=list[UserProfilePublic])
@@ -386,22 +743,38 @@ async def list_followers(
     limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
     offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> list[UserProfilePublic]:
-    result = await session.execute(select(User).where(_eq(User.username, username)))
-    target_user = result.scalar_one_or_none()
+    target_user = await _find_user_by_username(session, username)
     if target_user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    if target_user.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    current_user_id = _require_user_id(
+        current_user,
+        detail="User record missing identifier",
+    )
+    target_user_id = _require_user_id(
+        target_user,
+        detail="User record missing identifier",
+    )
+    can_view = await _can_view_target_content(
+        session,
+        viewer=current_user,
+        target=target_user,
+    )
+    if not can_view:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     followers_query = (
         select(User)
         .join(Follow, _eq(Follow.follower_id, User.id))
-        .where(_eq(Follow.followee_id, target_user.id))
+        .where(
+            _eq(Follow.followee_id, target_user_id),
+            build_not_blocked_either_direction_filter(
+                viewer_id=current_user_id,
+                candidate_user_id_column=cast(ColumnElement[str], User.id),
+            ),
+        )
         .order_by(User.username, User.id)
     )
     if offset > 0:
@@ -427,22 +800,38 @@ async def list_following(
     limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
     offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> list[UserProfilePublic]:
-    result = await session.execute(select(User).where(_eq(User.username, username)))
-    target_user = result.scalar_one_or_none()
+    target_user = await _find_user_by_username(session, username)
     if target_user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    if target_user.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    current_user_id = _require_user_id(
+        current_user,
+        detail="User record missing identifier",
+    )
+    target_user_id = _require_user_id(
+        target_user,
+        detail="User record missing identifier",
+    )
+    can_view = await _can_view_target_content(
+        session,
+        viewer=current_user,
+        target=target_user,
+    )
+    if not can_view:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     following_query = (
         select(User)
         .join(Follow, _eq(Follow.followee_id, User.id))
-        .where(_eq(Follow.follower_id, target_user.id))
+        .where(
+            _eq(Follow.follower_id, target_user_id),
+            build_not_blocked_either_direction_filter(
+                viewer_id=current_user_id,
+                candidate_user_id_column=cast(ColumnElement[str], User.id),
+            ),
+        )
         .order_by(User.username, User.id)
     )
     if offset > 0:
@@ -459,3 +848,197 @@ async def list_following(
         set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
 
     return [UserProfilePublic.model_validate(user) for user in following]
+
+
+@router.get("/users/{username}/follow-requests", response_model=list[UserProfilePublic])
+async def list_follow_requests(
+    username: str,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=MAX_PAGE_SIZE)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[UserProfilePublic]:
+    target_user = await _find_user_by_username(session, username)
+    if target_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    current_user_id = _require_user_id(
+        current_user,
+        detail="User record missing identifier",
+    )
+    target_user_id = _require_user_id(
+        target_user,
+        detail="User record missing identifier",
+    )
+    if current_user_id != target_user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    requests_query = (
+        select(User)
+        .join(FollowRequest, _eq(FollowRequest.requester_id, User.id))
+        .where(
+            _eq(FollowRequest.target_id, target_user_id),
+            build_not_blocked_either_direction_filter(
+                viewer_id=current_user_id,
+                candidate_user_id_column=cast(ColumnElement[str], User.id),
+            ),
+        )
+        .order_by(User.username, User.id)
+    )
+    if offset > 0:
+        requests_query = requests_query.offset(offset)
+    if limit is not None:
+        requests_query = requests_query.limit(limit + 1)
+
+    requests_result = await session.execute(requests_query)
+    requests = requests_result.scalars().all()
+    if limit is not None:
+        has_more = len(requests) > limit
+        if has_more:
+            requests = requests[:limit]
+        set_next_offset_header(response, offset=offset, limit=limit, has_more=has_more)
+
+    return [UserProfilePublic.model_validate(user) for user in requests]
+
+
+@router.post(
+    "/users/{username}/follow-requests/{requester_username}/approve",
+    status_code=status.HTTP_200_OK,
+)
+async def approve_follow_request(
+    username: str,
+    requester_username: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    target_user = await _find_user_by_username(session, username)
+    requester = await _find_user_by_username(session, requester_username)
+    if target_user is None or requester is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    current_user_id = _require_user_id(
+        current_user,
+        detail="User record missing identifier",
+    )
+    target_user_id = _require_user_id(
+        target_user,
+        detail="User record missing identifier",
+    )
+    requester_id = _require_user_id(
+        requester,
+        detail="User record missing identifier",
+    )
+    if current_user_id != target_user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    if requester_id == target_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot approve your own follow request",
+        )
+    block_state = await get_block_state(
+        session,
+        viewer_id=target_user_id,
+        target_id=requester_id,
+    )
+    if block_state.is_blocked or block_state.is_blocked_by:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot process follow request for blocked user",
+        )
+
+    has_request = await is_follow_request_pending(
+        session,
+        requester_id=requester_id,
+        target_id=target_user_id,
+    )
+    if not has_request:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Follow request not found",
+        )
+
+    await session.execute(
+        delete(FollowRequest).where(
+            _eq(FollowRequest.requester_id, requester_id),
+            _eq(FollowRequest.target_id, target_user_id),
+        )
+    )
+    session.add(Follow(follower_id=requester_id, followee_id=target_user_id))
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        if not is_unique_violation(exc):
+            raise
+        await session.execute(
+            delete(FollowRequest).where(
+                _eq(FollowRequest.requester_id, requester_id),
+                _eq(FollowRequest.target_id, target_user_id),
+            )
+        )
+        await session.commit()
+        return {"detail": "Already following"}
+
+    return {"detail": "Follow request approved"}
+
+
+@router.delete(
+    "/users/{username}/follow-requests/{requester_username}",
+    status_code=status.HTTP_200_OK,
+)
+async def decline_follow_request(
+    username: str,
+    requester_username: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    target_user = await _find_user_by_username(session, username)
+    requester = await _find_user_by_username(session, requester_username)
+    if target_user is None or requester is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    current_user_id = _require_user_id(
+        current_user,
+        detail="User record missing identifier",
+    )
+    target_user_id = _require_user_id(
+        target_user,
+        detail="User record missing identifier",
+    )
+    requester_id = _require_user_id(
+        requester,
+        detail="User record missing identifier",
+    )
+    if current_user_id != target_user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    block_state = await get_block_state(
+        session,
+        viewer_id=target_user_id,
+        target_id=requester_id,
+    )
+    if block_state.is_blocked or block_state.is_blocked_by:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot process follow request for blocked user",
+        )
+
+    has_request = await is_follow_request_pending(
+        session,
+        requester_id=requester_id,
+        target_id=target_user_id,
+    )
+    if not has_request:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Follow request not found",
+        )
+
+    await session.execute(
+        delete(FollowRequest).where(
+            _eq(FollowRequest.requester_id, requester_id),
+            _eq(FollowRequest.target_id, target_user_id),
+        )
+    )
+    await session.commit()
+    return {"detail": "Follow request declined"}

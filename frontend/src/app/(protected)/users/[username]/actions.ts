@@ -1,15 +1,16 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { Session } from "next-auth";
 
 import { getSessionServer } from "@/lib/auth/session";
 
+import type { BlockActionResult } from "./block-helpers";
+import { performBlockMutation } from "./block-helpers";
 import type { FollowActionResult } from "./follow-helpers";
 import { performFollowMutation } from "./follow-helpers";
 
 async function resolveAccessToken(): Promise<string | undefined> {
-  const session = (await getSessionServer()) as Session | null;
+  const session = await getSessionServer();
   return session?.accessToken as string | undefined;
 }
 
@@ -29,4 +30,16 @@ export async function unfollowUserAction(
   username: string,
 ): Promise<FollowActionResult> {
   return performFollowMutation(username, "DELETE", serverDeps);
+}
+
+export async function blockUserAction(
+  username: string,
+): Promise<BlockActionResult> {
+  return performBlockMutation(username, "POST", serverDeps);
+}
+
+export async function unblockUserAction(
+  username: string,
+): Promise<BlockActionResult> {
+  return performBlockMutation(username, "DELETE", serverDeps);
 }

@@ -1,15 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api/client";
 import {
+  blockUserRequest,
+  fetchBlockedUsersPage,
+  fetchUserConnectionPage,
+  fetchUserConnections,
   fetchUserFollowers,
   fetchUserFollowStatus,
   fetchUserPosts,
+  fetchUserPostsPage,
   fetchUserProfile,
   followUserRequest,
+  resolveFollowRequest,
+  unblockUserRequest,
   unfollowUserRequest,
 } from "../../lib/api/users";
 
+const apiFetchMock = vi.hoisted(() => vi.fn());
 const apiServerFetchMock = vi.hoisted(() => vi.fn());
+const apiServerFetchPageMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../lib/api/client", async () => {
   const actual = await vi.importActual<typeof import("../../lib/api/client")>(
@@ -17,7 +26,9 @@ vi.mock("../../lib/api/client", async () => {
   );
   return {
     ...actual,
+    apiFetch: apiFetchMock,
     apiServerFetch: apiServerFetchMock,
+    apiServerFetchPage: apiServerFetchPageMock,
   };
 });
 
@@ -28,7 +39,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  apiFetchMock.mockReset();
   apiServerFetchMock.mockReset();
+  apiServerFetchPageMock.mockReset();
   vi.unstubAllGlobals();
   process.env.BACKEND_API_URL = ORIGINAL_BACKEND_URL;
 });
@@ -109,6 +122,46 @@ describe("fetchUserPosts", () => {
   });
 });
 
+describe("fetchUserPostsPage", () => {
+  it("calls posts endpoint with pagination and returns api page", async () => {
+    const page = {
+      data: [{ id: 1, image_key: "posts/1.jpg", caption: "Hi", like_count: 2 }],
+      nextOffset: 18,
+    };
+    apiServerFetchPageMock.mockResolvedValueOnce(page);
+
+    const result = await fetchUserPostsPage(
+      "demo",
+      { limit: 18, offset: 18 },
+      "access-123",
+    );
+
+    expect(result).toEqual(page);
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/users/demo/posts?limit=18&offset=18",
+      expect.objectContaining({
+        headers: {
+          Cookie: "access_token=access-123",
+        },
+      }),
+    );
+  });
+
+  it("omits offset when it is zero", async () => {
+    const page = { data: [], nextOffset: null };
+    apiServerFetchPageMock.mockResolvedValueOnce(page);
+
+    await fetchUserPostsPage("demo", { limit: 18, offset: 0 });
+
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/users/demo/posts?limit=18",
+      expect.objectContaining({
+        headers: undefined,
+      }),
+    );
+  });
+});
+
 describe("fetchUserFollowers", () => {
   it("returns followers list on success", async () => {
     const followers = [
@@ -120,12 +173,15 @@ describe("fetchUserFollowers", () => {
         avatar_key: null,
       },
     ];
-    apiServerFetchMock.mockResolvedValueOnce(followers);
+    apiServerFetchPageMock.mockResolvedValueOnce({
+      data: followers,
+      nextOffset: null,
+    });
 
     const result = await fetchUserFollowers("demo", "token-1");
 
     expect(result).toEqual(followers);
-    expect(apiServerFetchMock).toHaveBeenCalledWith(
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
       "/api/v1/users/demo/followers",
       expect.objectContaining({
         headers: {
@@ -136,7 +192,7 @@ describe("fetchUserFollowers", () => {
   });
 
   it("throws when backend returns 404", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(
+    apiServerFetchPageMock.mockRejectedValueOnce(
       new ApiError(404, "User not found"),
     );
 
@@ -144,19 +200,161 @@ describe("fetchUserFollowers", () => {
   });
 
   it("throws when backend call fails with non-404", async () => {
-    apiServerFetchMock.mockRejectedValueOnce(new Error("nope"));
+    apiServerFetchPageMock.mockRejectedValueOnce(new Error("nope"));
 
     await expect(fetchUserFollowers("demo")).rejects.toThrow("nope");
   });
 });
 
+describe("fetchUserConnectionPage", () => {
+  it("calls the selected connection endpoint with pagination", async () => {
+    const page = {
+      data: [
+        {
+          id: "follower-1",
+          username: "ally",
+          name: "Ally",
+          bio: null,
+          avatar_key: null,
+        },
+      ],
+      nextOffset: 40,
+    };
+    apiServerFetchPageMock.mockResolvedValueOnce(page);
+
+    const result = await fetchUserConnectionPage(
+      "demo",
+      "following",
+      { limit: 20, offset: 20 },
+      "token-1",
+    );
+
+    expect(result).toEqual(page);
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/users/demo/following?limit=20&offset=20",
+      expect.objectContaining({
+        headers: {
+          Cookie: "access_token=token-1",
+        },
+      }),
+    );
+  });
+
+  it("omits pagination query when limit and offset are not provided", async () => {
+    const page = { data: [], nextOffset: null };
+    apiServerFetchPageMock.mockResolvedValueOnce(page);
+
+    const result = await fetchUserConnectionPage("demo", "followers");
+
+    expect(result).toEqual(page);
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/users/demo/followers",
+      expect.objectContaining({
+        headers: undefined,
+      }),
+    );
+  });
+});
+
+describe("fetchUserConnections", () => {
+  it("calls the frontend connections endpoint with kind and pagination", async () => {
+    const page = {
+      data: [
+        {
+          id: "follower-1",
+          username: "ally",
+          name: "Ally",
+          bio: null,
+          avatar_key: null,
+        },
+      ],
+      nextOffset: 20,
+    };
+    apiFetchMock.mockResolvedValueOnce(page);
+
+    const result = await fetchUserConnections("demo", "followers", {
+      limit: 20,
+      offset: 0,
+    });
+
+    expect(result).toEqual(page);
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/users/demo/connections?kind=followers&limit=20",
+      expect.objectContaining({
+        cache: "no-store",
+        credentials: "include",
+      }),
+    );
+  });
+
+  it("omits offset in client request when offset is zero", async () => {
+    const page = { data: [], nextOffset: null };
+    apiFetchMock.mockResolvedValueOnce(page);
+
+    await fetchUserConnections("demo", "following", {
+      limit: 10,
+      offset: 0,
+    });
+
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/api/users/demo/connections?kind=following&limit=10",
+      expect.anything(),
+    );
+  });
+});
+
+describe("fetchBlockedUsersPage", () => {
+  it("calls blocked-users endpoint with pagination", async () => {
+    const page = {
+      data: [
+        {
+          id: "blocked-1",
+          username: "blocked_user",
+          name: "Blocked User",
+          bio: null,
+          avatar_key: null,
+        },
+      ],
+      nextOffset: null,
+    };
+    apiServerFetchPageMock.mockResolvedValueOnce(page);
+
+    const result = await fetchBlockedUsersPage(
+      { limit: 20, offset: 20 },
+      "token-1",
+    );
+
+    expect(result).toEqual(page);
+    expect(apiServerFetchPageMock).toHaveBeenCalledWith(
+      "/api/v1/me/blocked-users?limit=20&offset=20",
+      expect.objectContaining({
+        headers: {
+          Cookie: "access_token=token-1",
+        },
+      }),
+    );
+  });
+});
+
 describe("fetchUserFollowStatus", () => {
   it("returns follow status when backend call succeeds", async () => {
-    apiServerFetchMock.mockResolvedValueOnce({ is_following: true });
+    apiServerFetchMock.mockResolvedValueOnce({
+      is_following: true,
+      is_requested: false,
+      is_private: true,
+      is_blocked: true,
+      is_blocked_by: false,
+    });
 
     const result = await fetchUserFollowStatus("demo", "token-1");
 
-    expect(result).toBe(true);
+    expect(result).toEqual({
+      is_following: true,
+      is_requested: false,
+      is_private: true,
+      is_blocked: true,
+      is_blocked_by: false,
+    });
     expect(apiServerFetchMock).toHaveBeenCalledWith(
       "/api/v1/users/demo/follow-status",
       expect.objectContaining({
@@ -170,7 +368,13 @@ describe("fetchUserFollowStatus", () => {
   it("returns false when no token is provided", async () => {
     const result = await fetchUserFollowStatus("demo");
 
-    expect(result).toBe(false);
+    expect(result).toEqual({
+      is_following: false,
+      is_requested: false,
+      is_private: false,
+      is_blocked: false,
+      is_blocked_by: false,
+    });
     expect(apiServerFetchMock).not.toHaveBeenCalled();
   });
 
@@ -198,7 +402,7 @@ describe("followUserRequest", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ detail: "Followed" }),
+      json: async () => ({ detail: "Followed", state: "following" }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -208,6 +412,7 @@ describe("followUserRequest", () => {
       success: true,
       status: 200,
       detail: "Followed",
+      state: "following",
     });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/v1/users/demo/follow"),
@@ -232,6 +437,7 @@ describe("followUserRequest", () => {
       success: false,
       status: 404,
       detail: "User not found",
+      state: "none",
     });
   });
 });
@@ -241,7 +447,7 @@ describe("unfollowUserRequest", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ detail: "Unfollowed" }),
+      json: async () => ({ detail: "Unfollowed", state: "none" }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -251,6 +457,7 @@ describe("unfollowUserRequest", () => {
       success: true,
       status: 200,
       detail: "Unfollowed",
+      state: "none",
     });
   });
 
@@ -263,5 +470,86 @@ describe("unfollowUserRequest", () => {
     expect(result.success).toBe(false);
     expect(result.status).toBe(500);
     expect(result.detail).toBe("network");
+    expect(result.state).toBe("none");
+  });
+});
+
+describe("blockUserRequest", () => {
+  it("returns success when backend accepts block", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ detail: "User blocked", blocked: true }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await blockUserRequest("demo", "access-123");
+
+    expect(result).toEqual({
+      success: true,
+      status: 200,
+      detail: "User blocked",
+      blocked: true,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/users/demo/block"),
+      expect.objectContaining({
+        method: "POST",
+        headers: { Cookie: "access_token=access-123" },
+      }),
+    );
+  });
+});
+
+describe("unblockUserRequest", () => {
+  it("returns success when backend accepts unblock", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ detail: "User unblocked", blocked: false }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await unblockUserRequest("demo", "access-123");
+
+    expect(result).toEqual({
+      success: true,
+      status: 200,
+      detail: "User unblocked",
+      blocked: false,
+    });
+  });
+});
+
+describe("resolveFollowRequest", () => {
+  it("approves request when backend accepts mutation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ detail: "Follow request approved" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await resolveFollowRequest(
+      "demo",
+      "requester",
+      "approve",
+      "access-123",
+    );
+
+    expect(result).toEqual({
+      success: true,
+      status: 200,
+      detail: "Follow request approved",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/api/v1/users/demo/follow-requests/requester/approve",
+      ),
+      expect.objectContaining({
+        method: "POST",
+        headers: { Cookie: "access_token=access-123" },
+      }),
+    );
   });
 });

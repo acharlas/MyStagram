@@ -1,24 +1,32 @@
-import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SettingsIcon } from "@/components/ui/icons";
+import { BlockButton } from "@/components/user/BlockButton";
+import { ConnectionsPanel } from "@/components/user/ConnectionsPanel";
 import { FollowButton } from "@/components/user/FollowButton";
+import { UserPostsGrid } from "@/components/user/UserPostsGrid";
 import { ApiError } from "@/lib/api/client";
 import {
   fetchUserFollowStatus,
-  fetchUserPosts,
+  fetchUserPostsPage,
   fetchUserProfile,
 } from "@/lib/api/users";
 import { getSessionServer } from "@/lib/auth/session";
 import { buildImageUrl } from "@/lib/image";
-import { sanitizeHtml } from "@/lib/sanitize";
-import { followUserAction, unfollowUserAction } from "./actions";
+import {
+  blockUserAction,
+  followUserAction,
+  unblockUserAction,
+  unfollowUserAction,
+} from "./actions";
 
 type UserProfilePageProps = {
   params: Promise<{ username: string }>;
 };
+
+const USER_POSTS_PAGE_SIZE = 18;
 
 export default async function UserProfilePage({
   params,
@@ -28,46 +36,69 @@ export default async function UserProfilePage({
   const accessToken = session?.accessToken as string | undefined;
   const viewerUsername = session?.user?.username ?? null;
 
-  const profilePromise = fetchUserProfile(username, accessToken);
-  const postsPromise = fetchUserPosts(username, accessToken);
-  const profile = await profilePromise;
+  const profile = await fetchUserProfile(username, accessToken);
 
   if (!profile) {
     notFound();
   }
 
   const displayName = profile.name ?? profile.username;
-  const safeBio = profile.bio ? sanitizeHtml(profile.bio) : "";
   const initials = displayName.slice(0, 2).toUpperCase();
   const avatarUrl = profile.avatar_key
     ? buildImageUrl(profile.avatar_key)
     : null;
+  const isPrivateAccount = Boolean(profile.is_private);
   const isOwnProfile = viewerUsername === profile.username;
+  let followStatus = {
+    is_following: false,
+    is_requested: false,
+    is_private: isPrivateAccount,
+    is_blocked: false,
+    is_blocked_by: false,
+  };
 
-  let isFollowing = false;
-  const followStatusPromise =
-    !isOwnProfile && accessToken && viewerUsername
-      ? fetchUserFollowStatus(username, accessToken)
-      : Promise.resolve(false);
-
-  let posts = [] as Awaited<ReturnType<typeof fetchUserPosts>>;
-  try {
-    [posts, isFollowing] = await Promise.all([
-      postsPromise,
-      followStatusPromise,
-    ]);
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 404) {
-      notFound();
+  if (!isOwnProfile && accessToken && viewerUsername) {
+    try {
+      followStatus = await fetchUserFollowStatus(username, accessToken);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        notFound();
+      }
+      throw error;
     }
-    throw error;
+  }
+
+  const canViewPosts =
+    !followStatus.is_blocked &&
+    (isOwnProfile || !isPrivateAccount || followStatus.is_following);
+
+  let postsPage: Awaited<ReturnType<typeof fetchUserPostsPage>> = {
+    data: [],
+    nextOffset: null,
+  };
+  if (canViewPosts) {
+    try {
+      postsPage = await fetchUserPostsPage(
+        username,
+        {
+          limit: USER_POSTS_PAGE_SIZE,
+          offset: 0,
+        },
+        accessToken,
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        notFound();
+      }
+      throw error;
+    }
   }
 
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-2">
       <header className="ui-surface-card rounded-3xl border ui-border p-5 backdrop-blur sm:p-6">
         <div className="flex flex-col gap-6 text-center sm:flex-row sm:items-start sm:justify-between sm:text-left">
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:gap-6">
+          <div className="flex min-w-0 flex-col items-center gap-4 sm:flex-row sm:items-start sm:gap-6">
             <Avatar className="ui-surface-input flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border ui-border ring-2 ring-[color:var(--ui-border)]">
               {avatarUrl ? (
                 <AvatarImage
@@ -78,13 +109,13 @@ export default async function UserProfilePage({
                   className="h-full w-full object-cover"
                 />
               ) : (
-                <AvatarFallback className="ui-surface-input flex h-full w-full items-center justify-center text-2xl font-semibold text-zinc-100">
+                <AvatarFallback className="ui-surface-input ui-text-strong flex h-full w-full items-center justify-center text-2xl font-semibold">
                   {initials}
                 </AvatarFallback>
               )}
             </Avatar>
-            <div className="space-y-2">
-              <h1 className="text-2xl font-semibold tracking-tight text-zinc-100 sm:text-3xl">
+            <div className="min-w-0 space-y-2">
+              <h1 className="ui-text-strong text-2xl font-semibold tracking-tight sm:text-3xl">
                 @{profile.username}
               </h1>
               {profile.name ? (
@@ -92,27 +123,55 @@ export default async function UserProfilePage({
                   {profile.name}
                 </p>
               ) : null}
-              {safeBio ? (
-                <p className="ui-text-muted max-w-xl text-sm leading-relaxed">
-                  {safeBio}
+              {profile.bio ? (
+                <p className="ui-text-muted max-w-xl whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-relaxed">
+                  {profile.bio}
                 </p>
               ) : null}
+              <ConnectionsPanel
+                username={profile.username}
+                isOwnProfile={isOwnProfile}
+              />
               {!isOwnProfile && viewerUsername && accessToken ? (
-                <FollowButton
-                  initiallyFollowing={isFollowing}
-                  followAction={followUserAction.bind(null, profile.username)}
-                  unfollowAction={unfollowUserAction.bind(
-                    null,
-                    profile.username,
-                  )}
-                />
+                <div className="flex flex-wrap items-center gap-2">
+                  {!followStatus.is_blocked ? (
+                    <FollowButton
+                      initiallyFollowing={followStatus.is_following}
+                      initiallyRequested={followStatus.is_requested}
+                      isPrivateAccount={isPrivateAccount}
+                      followAction={followUserAction.bind(
+                        null,
+                        profile.username,
+                      )}
+                      unfollowAction={unfollowUserAction.bind(
+                        null,
+                        profile.username,
+                      )}
+                    />
+                  ) : null}
+                  <BlockButton
+                    initiallyBlocked={followStatus.is_blocked}
+                    blockAction={blockUserAction.bind(null, profile.username)}
+                    unblockAction={unblockUserAction.bind(
+                      null,
+                      profile.username,
+                    )}
+                  />
+                </div>
+              ) : null}
+              {!canViewPosts ? (
+                <p className="ui-surface-input ui-text-muted rounded-2xl border ui-border px-4 py-3 text-sm">
+                  {followStatus.is_blocked
+                    ? "Vous avez bloque ce compte. Debloquez-le pour revoir ses publications."
+                    : "Ce compte est privé. Suivez ce profil pour voir ses publications."}
+                </p>
               ) : null}
             </div>
           </div>
           {isOwnProfile ? (
             <Link
               href="/settings"
-              className="ui-surface-input inline-flex h-10 w-10 items-center justify-center self-center rounded-full border ui-border text-zinc-200 transition hover:border-sky-500/60 hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)] sm:self-start"
+              className="ui-focus-ring ui-surface-input ui-text-muted inline-flex h-10 w-10 items-center justify-center self-center rounded-full border ui-border transition hover:border-[color:var(--ui-border-strong)] hover:text-[color:var(--ui-text-strong)] focus:outline-none sm:self-start"
               aria-label="Ouvrir les paramètres du profil"
               title="Paramètres"
             >
@@ -122,35 +181,14 @@ export default async function UserProfilePage({
         </div>
       </header>
 
-      <section
-        aria-label="Publications de l'utilisateur"
-        className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4"
-      >
-        {posts.length === 0 ? (
-          <p className="ui-surface-card ui-text-subtle col-span-full rounded-2xl border ui-border p-5 text-center text-sm sm:text-left">
-            Aucune publication pour le moment.
-          </p>
-        ) : (
-          posts.map((post) => {
-            const imageUrl = buildImageUrl(post.image_key);
-            return (
-              <Link
-                key={post.id}
-                href={`/posts/${post.id}`}
-                className="ui-surface-input group relative block aspect-square overflow-hidden rounded-2xl border ui-border focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
-              >
-                <Image
-                  src={imageUrl}
-                  alt={`Publication ${post.id}`}
-                  fill
-                  className="object-cover transition duration-500 group-hover:scale-[1.03]"
-                  sizes="(max-width: 768px) 50vw, 30vw"
-                />
-              </Link>
-            );
-          })
-        )}
-      </section>
+      {canViewPosts ? (
+        <UserPostsGrid
+          username={profile.username}
+          initialPosts={postsPage.data}
+          initialNextOffset={postsPage.nextOffset}
+          pageSize={USER_POSTS_PAGE_SIZE}
+        />
+      ) : null}
     </section>
   );
 }

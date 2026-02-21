@@ -1,32 +1,38 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { buildImageUrl } from "../../lib/image";
-
-const ORIGINAL_PUBLIC_BASE_URL = process.env.NEXT_PUBLIC_MINIO_BASE_URL;
-
-afterEach(() => {
-  if (typeof ORIGINAL_PUBLIC_BASE_URL === "undefined") {
-    delete process.env.NEXT_PUBLIC_MINIO_BASE_URL;
-  } else {
-    process.env.NEXT_PUBLIC_MINIO_BASE_URL = ORIGINAL_PUBLIC_BASE_URL;
-  }
-});
+import {
+  buildAvatarUrl,
+  buildImageUrl,
+  DEFAULT_AVATAR_OBJECT_KEY,
+} from "../../lib/image";
 
 describe("buildImageUrl", () => {
-  it("concatenates configured base url and object key", () => {
-    process.env.NEXT_PUBLIC_MINIO_BASE_URL =
-      "http://minio:9000/instagram-media/";
-
+  it("builds internal media route URL", () => {
     expect(buildImageUrl("posts/id/photo.jpg")).toBe(
-      "http://minio:9000/instagram-media/posts/id/photo.jpg",
+      "/api/media?key=posts%2Fid%2Fphoto.jpg",
     );
   });
 
-  it("falls back to docker default base url", () => {
-    delete process.env.NEXT_PUBLIC_MINIO_BASE_URL;
+  it("normalizes leading slash in object keys", () => {
+    expect(buildImageUrl("/posts/id/photo.jpg")).toBe(
+      "/api/media?key=posts%2Fid%2Fphoto.jpg",
+    );
+  });
+});
 
-    expect(buildImageUrl("posts/id/photo.jpg")).toBe(
-      "http://minio:9000/instagram-media/posts/id/photo.jpg",
+describe("buildAvatarUrl", () => {
+  it("uses provided avatar key when available", () => {
+    expect(buildAvatarUrl("avatars/u1/custom.png")).toBe(
+      "/api/media?key=avatars%2Fu1%2Fcustom.png",
+    );
+  });
+
+  it("falls back to default avatar key when missing", () => {
+    expect(buildAvatarUrl(null)).toBe(
+      `/api/media?key=${encodeURIComponent(DEFAULT_AVATAR_OBJECT_KEY)}`,
+    );
+    expect(buildAvatarUrl("")).toBe(
+      `/api/media?key=${encodeURIComponent(DEFAULT_AVATAR_OBJECT_KEY)}`,
     );
   });
 });

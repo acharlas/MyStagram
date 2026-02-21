@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildPathWithoutSearchParam,
   getFocusTrapTarget,
   isPathActive,
+  resolveOwnRequestsHref,
   resolveProfileHref,
   shouldCloseSearch,
 } from "@/components/ui/navbar-helpers";
@@ -11,6 +13,19 @@ describe("navbar helpers", () => {
   it("resolves profile href to username route when username is provided", () => {
     expect(resolveProfileHref("/profile", "alice")).toBe("/users/alice");
     expect(resolveProfileHref("/", "alice")).toBe("/");
+  });
+
+  it("resolves own requests href and falls back to login on invalid username", () => {
+    expect(resolveOwnRequestsHref("alice")).toBe("/users/alice?panel=requests");
+    expect(resolveOwnRequestsHref("")).toBe("/login");
+    expect(resolveOwnRequestsHref(undefined)).toBe("/login");
+  });
+
+  it("removes one query parameter while preserving others", () => {
+    const params = new URLSearchParams("panel=requests&q=alice&offset=20");
+    expect(buildPathWithoutSearchParam("/users/alice", params, "panel")).toBe(
+      "/users/alice?q=alice&offset=20",
+    );
   });
 
   it("detects active root and nested paths", () => {

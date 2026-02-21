@@ -1,10 +1,9 @@
-import { getServerSession } from "next-auth";
-
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ApiError, apiServerFetch } from "@/lib/api/client";
+import { ApiError, type ApiPage, apiServerFetch } from "@/lib/api/client";
+import { fetchBlockedUsersPage, type UserProfilePublic } from "@/lib/api/users";
+import { getSessionServer } from "@/lib/auth/session";
 import { buildImageUrl } from "@/lib/image";
-import { updateProfileAction } from "./actions";
+import { unblockUserAction, updateProfileAction } from "./actions";
 import { CharacterCountField } from "./CharacterCountField";
 import {
   SETTINGS_ALLOWED_AVATAR_MIME_TYPES,
@@ -19,6 +18,7 @@ type CurrentUserProfile = {
   name: string | null;
   bio: string | null;
   avatar_key: string | null;
+  is_private: boolean;
 };
 
 type SettingsPageSearchParams = {
@@ -50,6 +50,33 @@ async function fetchCurrentUser(accessToken?: string) {
   }
 }
 
+async function fetchBlockedUsers(
+  accessToken?: string,
+): Promise<ApiPage<UserProfilePublic[]>> {
+  if (!accessToken) {
+    return {
+      data: [],
+      nextOffset: null,
+    };
+  }
+
+  try {
+    return await fetchBlockedUsersPage({ limit: 50, offset: 0 }, accessToken);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return {
+        data: [],
+        nextOffset: null,
+      };
+    }
+    console.error("Failed to load blocked users", error);
+    return {
+      data: [],
+      nextOffset: null,
+    };
+  }
+}
+
 export default async function SettingsPage({
   searchParams,
 }: SettingsPageProps = {}) {
@@ -58,7 +85,7 @@ export default async function SettingsPage({
     : undefined;
   const errorParam = resolvedSearchParams?.error;
   const errorMessage = Array.isArray(errorParam) ? errorParam[0] : errorParam;
-  const session = await getServerSession(authOptions);
+  const session = await getSessionServer();
 
   if (!session) {
     return (
@@ -69,7 +96,10 @@ export default async function SettingsPage({
   }
 
   const accessToken = session?.accessToken as string | undefined;
-  const profile = await fetchCurrentUser(accessToken);
+  const [profile, blockedUsersPage] = await Promise.all([
+    fetchCurrentUser(accessToken),
+    fetchBlockedUsers(accessToken),
+  ]);
 
   if (!profile) {
     return (
@@ -97,7 +127,7 @@ export default async function SettingsPage({
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-6 py-2">
       <header className="ui-surface-card rounded-3xl border ui-border px-5 py-4 backdrop-blur sm:px-6">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">
+        <h1 className="ui-text-strong text-2xl font-semibold tracking-tight">
           Paramètres du profil
         </h1>
         <p className="ui-text-muted mt-1 text-sm">
@@ -108,7 +138,7 @@ export default async function SettingsPage({
       {errorMessage ? (
         <p
           role="alert"
-          className="rounded-2xl border border-red-500/40 bg-red-950/40 px-4 py-3 text-sm text-red-200"
+          className="ui-error-surface rounded-2xl px-4 py-3 text-sm"
         >
           {errorMessage}
         </p>
@@ -154,7 +184,7 @@ export default async function SettingsPage({
                   className="h-full w-full object-cover"
                 />
               ) : (
-                <AvatarFallback className="ui-surface-input text-zinc-100">
+                <AvatarFallback className="ui-surface-input ui-text-strong">
                   {initials || displayName.slice(0, 2).toUpperCase()}
                 </AvatarFallback>
               )}
@@ -165,7 +195,7 @@ export default async function SettingsPage({
                 name="avatar"
                 type="file"
                 accept={acceptedAvatarTypes}
-                className="ui-surface-input w-full cursor-pointer rounded-xl border border-dashed ui-border px-3 py-2 text-sm text-zinc-200 file:mr-3 file:rounded-md file:border-0 file:bg-[color:var(--ui-surface-muted)] file:px-3 file:py-1 file:text-sm file:font-medium file:text-zinc-100 hover:border-[color:var(--ui-border-strong)] focus:outline-none focus:ring-2 focus:ring-sky-500/70"
+                className="ui-focus-ring ui-surface-input ui-text-muted w-full cursor-pointer rounded-xl border border-dashed ui-border px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-[color:var(--ui-surface-muted)] file:px-3 file:py-1 file:text-sm file:font-medium file:text-[color:var(--ui-text-strong)] hover:border-[color:var(--ui-border-strong)] focus:outline-none"
               />
               <p className="ui-text-subtle text-xs">
                 Types: {acceptedAvatarTypes} - Taille max: {maxAvatarSizeMb} Mo
@@ -192,15 +222,74 @@ export default async function SettingsPage({
           rows={3}
         />
 
+        <label className="ui-surface-input ui-focus-ring flex items-start gap-3 rounded-2xl border ui-border px-3 py-3 text-sm focus-within:outline-none">
+          <input
+            type="checkbox"
+            name="is_private"
+            value="true"
+            defaultChecked={Boolean(profile.is_private)}
+            className="mt-0.5 h-4 w-4 rounded border ui-border"
+          />
+          <span className="min-w-0">
+            <span className="ui-text-strong block font-medium">
+              Compte privé
+            </span>
+            <span className="ui-text-muted block text-xs">
+              Seuls vos followers approuvés peuvent voir vos publications.
+            </span>
+          </span>
+        </label>
+
         <div className="flex justify-end">
           <button
             type="submit"
-            className="rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500"
+            className="ui-focus-ring ui-accent-button rounded-full px-4 py-2 text-sm font-semibold"
           >
             Enregistrer
           </button>
         </div>
       </form>
+
+      <section className="ui-surface-card space-y-4 rounded-3xl border ui-border p-5 backdrop-blur sm:p-6">
+        <header>
+          <h2 className="ui-text-strong text-lg font-semibold tracking-tight">
+            Utilisateurs bloques
+          </h2>
+          <p className="ui-text-muted mt-1 text-sm">
+            Les comptes bloques ne peuvent plus interagir avec vous.
+          </p>
+        </header>
+
+        {blockedUsersPage.data.length === 0 ? (
+          <p className="ui-text-muted text-sm">Aucun utilisateur bloque.</p>
+        ) : (
+          <ul className="space-y-2">
+            {blockedUsersPage.data.map((user) => (
+              <li
+                key={user.id}
+                className="ui-surface-input flex items-center justify-between gap-3 rounded-2xl border ui-border px-3 py-2"
+              >
+                <span className="ui-text-strong truncate text-sm font-medium">
+                  @{user.username}
+                </span>
+                <form action={unblockUserAction}>
+                  <input
+                    type="hidden"
+                    name="blocked_username"
+                    value={user.username}
+                  />
+                  <button
+                    type="submit"
+                    className="ui-focus-ring ui-surface-input ui-text-muted rounded-full border ui-border px-3 py-1 text-xs font-semibold transition hover:border-[color:var(--ui-border-strong)] hover:text-[color:var(--ui-text-strong)] focus:outline-none"
+                  >
+                    Debloquer
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </section>
   );
 }

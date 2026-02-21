@@ -16,7 +16,7 @@ export default function ProtectedError({ error, reset }: ProtectedErrorProps) {
         <p className="ui-text-subtle text-xs uppercase tracking-[0.2em]">
           Erreur
         </p>
-        <h1 className="mt-2 text-xl font-semibold tracking-tight text-zinc-100">
+        <h1 className="ui-text-strong mt-2 text-xl font-semibold tracking-tight">
           Impossible de charger cette page.
         </h1>
         <p className="ui-text-muted mt-2 text-sm">
@@ -24,19 +24,19 @@ export default function ProtectedError({ error, reset }: ProtectedErrorProps) {
           secondes.
         </p>
         {digest ? (
-          <p className="ui-text-subtle mt-2 text-xs">Reference: {digest}</p>
+          <p className="ui-text-subtle mt-2 text-xs">Référence: {digest}</p>
         ) : null}
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={() => reset()}
-            className="inline-flex rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-500"
+            className="ui-focus-ring ui-accent-button inline-flex rounded-full px-4 py-2 text-sm font-semibold"
           >
             Reessayer
           </button>
           <Link
             href="/"
-            className="ui-text-muted inline-flex rounded-full border ui-border px-4 py-2 text-sm font-semibold transition hover:text-zinc-100"
+            className="ui-focus-ring ui-text-muted inline-flex rounded-full border ui-border px-4 py-2 text-sm font-semibold transition hover:border-[color:var(--ui-border-strong)] hover:text-[color:var(--ui-text-strong)]"
           >
             Retour au fil
           </Link>

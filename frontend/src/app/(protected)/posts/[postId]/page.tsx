@@ -2,38 +2,93 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { CommentForm } from "@/components/post/CommentForm";
-import { LikeButton } from "@/components/post/LikeButton";
+import { CommentList } from "@/components/post/CommentList";
+import { DeletePostButton } from "@/components/post/DeletePostButton";
+import { EditPostCaption } from "@/components/post/EditPostCaption";
+import { PostLikeSection } from "@/components/post/PostLikeSection";
+import { SavePostButton } from "@/components/post/SavePostButton";
+import { Avatar, AvatarImage } from "@/components/ui/avatar";
 import { CommentIcon } from "@/components/ui/icons";
-import { fetchPostComments, fetchPostDetail } from "@/lib/api/posts";
+import { ApiError } from "@/lib/api/client";
+import {
+  fetchPostCommentsPage,
+  fetchPostDetail,
+  fetchPostSavedStatus,
+} from "@/lib/api/posts";
 import { getSessionServer } from "@/lib/auth/session";
-import { buildImageUrl } from "@/lib/image";
-import { sanitizeHtml } from "@/lib/sanitize";
+import { buildAvatarUrl, buildImageUrl } from "@/lib/image";
 
 type PostPageProps = { params: Promise<{ postId: string }> };
+const COMMENTS_PAGE_SIZE = 20;
+
+function isValidPostId(postId: string): boolean {
+  return /^\d+$/.test(postId);
+}
+
+function renderMissingPost() {
+  return (
+    <section className="ui-text-subtle mx-auto flex w-full max-w-xl flex-col gap-4 py-8 text-center text-sm">
+      <p>Ce contenu est introuvable.</p>
+    </section>
+  );
+}
 
 export default async function PostDetailPage({ params }: PostPageProps) {
   const { postId } = await params;
+  if (!isValidPostId(postId)) {
+    return renderMissingPost();
+  }
+
   const session = await getSessionServer();
   const accessToken = session?.accessToken as string | undefined;
+  const viewerUserId = session?.user?.id ?? null;
+  const viewerUsername = session?.user?.username ?? null;
 
-  const [post, comments] = await Promise.all([
+  const initialCommentsPagePromise = accessToken
+    ? fetchPostCommentsPage(
+        postId,
+        {
+          limit: COMMENTS_PAGE_SIZE,
+          offset: 0,
+        },
+        accessToken,
+      ).catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 404) {
+          return {
+            data: [],
+            nextOffset: null,
+          };
+        }
+        throw error;
+      })
+    : Promise.resolve({
+        data: [],
+        nextOffset: null,
+      });
+
+  const initialSavedStatusPromise = accessToken
+    ? fetchPostSavedStatus(postId, accessToken)
+    : Promise.resolve(null);
+
+  const [post, commentsPage, initialSavedStatus] = await Promise.all([
     fetchPostDetail(postId, accessToken),
-    fetchPostComments(postId, accessToken),
+    initialCommentsPagePromise,
+    initialSavedStatusPromise,
   ]);
 
   if (!post) {
-    return (
-      <section className="ui-text-subtle mx-auto flex w-full max-w-xl flex-col gap-4 py-8 text-center text-sm">
-        <p>Ce contenu est introuvable.</p>
-      </section>
-    );
+    return renderMissingPost();
   }
 
   const authorLabel =
     post.author_name ?? post.author_username ?? post.author_id;
   const authorUsername = post.author_username ?? undefined;
+  const authorAvatarUrl = buildAvatarUrl(post.author_avatar_key);
   const imageUrl = buildImageUrl(post.image_key);
-  const safeCaption = post.caption ? sanitizeHtml(post.caption) : "";
+  const canManagePost = viewerUserId === post.author_id;
+  const deleteRedirectHref = viewerUsername
+    ? `/users/${encodeURIComponent(viewerUsername)}`
+    : null;
 
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-5 py-2 lg:h-[84vh] lg:flex-row lg:gap-4">
@@ -55,71 +110,69 @@ export default async function PostDetailPage({ params }: PostPageProps) {
         className="ui-surface-card flex max-h-full flex-col rounded-3xl border ui-border p-4 shadow-[0_20px_45px_-35px_rgba(8,112,184,0.55)] lg:w-[25rem]"
       >
         <header className="mb-4 border-b ui-border pb-3">
-          {authorUsername ? (
-            <Link
-              href={`/users/${encodeURIComponent(authorUsername)}`}
-              className="text-sm font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
-            >
-              {authorLabel}
-            </Link>
+          <div className="flex items-center gap-2.5">
+            <Avatar className="ui-surface-muted ui-text-muted flex h-9 w-9 items-center justify-center overflow-hidden rounded-full ring-1 ring-[color:var(--ui-border)]">
+              <AvatarImage
+                src={authorAvatarUrl}
+                alt={`Avatar de ${authorLabel}`}
+                width={36}
+                height={36}
+                className="h-full w-full object-cover"
+              />
+            </Avatar>
+            {authorUsername ? (
+              <Link
+                href={`/users/${encodeURIComponent(authorUsername)}`}
+                className="ui-focus-ring ui-text-strong text-sm font-semibold transition hover:text-[color:var(--ui-nav-icon-active)] focus:outline-none"
+              >
+                {authorLabel}
+              </Link>
+            ) : (
+              <p className="ui-text-strong text-sm font-semibold">
+                {authorLabel}
+              </p>
+            )}
+          </div>
+          {canManagePost ? (
+            <EditPostCaption postId={post.id} initialCaption={post.caption} />
           ) : (
-            <p className="text-sm font-semibold text-zinc-100">{authorLabel}</p>
+            <p className="ui-text-muted mt-2 text-sm leading-relaxed whitespace-pre-wrap">
+              {post.caption || "Aucune légende"}
+            </p>
           )}
-          <p className="mt-2 text-sm leading-relaxed text-zinc-200">
-            {safeCaption || "Aucune légende"}
-          </p>
+          {canManagePost && deleteRedirectHref ? (
+            <DeletePostButton
+              postId={post.id}
+              redirectHref={deleteRedirectHref}
+            />
+          ) : null}
         </header>
 
-        <div className="flex-1 overflow-y-auto pr-1">
-          {comments.length === 0 ? (
-            <p className="ui-text-subtle text-sm">
-              Pas encore de commentaires.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {comments.map((comment) => {
-                const commentAuthorLabel =
-                  comment.author_name ??
-                  comment.author_username ??
-                  comment.author_id;
-                const commentAuthorUsername =
-                  comment.author_username ?? undefined;
-                return (
-                  <li
-                    key={comment.id}
-                    className="ui-surface-input rounded-xl border ui-border px-3 py-2 text-sm text-zinc-200"
-                  >
-                    {commentAuthorUsername ? (
-                      <Link
-                        href={`/users/${encodeURIComponent(commentAuthorUsername)}`}
-                        className="font-semibold text-zinc-100 transition hover:text-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500/70 focus:ring-offset-2 focus:ring-offset-[color:var(--background)]"
-                      >
-                        {commentAuthorLabel}
-                      </Link>
-                    ) : (
-                      <span className="font-semibold text-zinc-100">
-                        {commentAuthorLabel}
-                      </span>
-                    )}
-                    <span className="ui-text-muted">: </span>
-                    {comment.text}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
+        <CommentList
+          postId={post.id}
+          postAuthorId={post.author_id}
+          viewerUserId={viewerUserId}
+          initialComments={commentsPage.data}
+          initialNextOffset={commentsPage.nextOffset}
+          pageSize={COMMENTS_PAGE_SIZE}
+        />
 
         <footer className="mt-4 border-t ui-border pt-4">
           <div className="ui-text-muted flex items-center gap-3">
-            <LikeButton
+            <PostLikeSection
               postId={post.id}
               initialLiked={post.viewer_has_liked}
               initialCount={post.like_count}
             />
-            <span className="ui-surface-input inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-xs font-medium text-zinc-300">
+            {initialSavedStatus !== null ? (
+              <SavePostButton
+                postId={post.id}
+                initialSaved={initialSavedStatus}
+              />
+            ) : null}
+            <span className="ui-surface-input ui-nav-icon inline-flex items-center gap-2 rounded-full px-2.5 py-1.5 text-xs font-medium">
               <CommentIcon className="h-4 w-4" />
-              {comments.length}
+              Commentaires
             </span>
           </div>
           <CommentForm postId={post.id} />

@@ -273,6 +273,301 @@ describe("getSessionServer", () => {
     expect(getter).toHaveBeenCalledWith(authModule.authOptions);
     expect(result).toBe(session);
   });
+
+  it("hydrates access token from JWT cookie for server callers", async () => {
+    const getter = vi.fn().mockResolvedValue({
+      user: {
+        id: "user-id",
+        username: "string",
+        avatarUrl: null,
+      },
+      expires: "2099-01-01T00:00:00.000Z",
+    });
+    const getJwtToken = vi.fn().mockResolvedValue({
+      accessToken: "server-access-token",
+      accessTokenExpires: Date.now() + 60_000,
+    });
+    const readCookies = vi.fn().mockResolvedValue({
+      getAll: () => [
+        { name: "next-auth.session-token", value: "cookie-value" },
+      ],
+    });
+
+    const result = await getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+      },
+    );
+
+    expect(getJwtToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        req: expect.objectContaining({
+          cookies: expect.objectContaining({
+            "next-auth.session-token": "cookie-value",
+          }),
+        }),
+        secret: "test-secret",
+      }),
+    );
+    expect(result).toMatchObject({
+      accessToken: "server-access-token",
+    });
+  });
+
+  it("does not hydrate expired access token from JWT cookie", async () => {
+    const getter = vi.fn().mockResolvedValue({
+      user: {
+        id: "user-id",
+        username: "string",
+        avatarUrl: null,
+      },
+      expires: "2099-01-01T00:00:00.000Z",
+    });
+    const getJwtToken = vi.fn().mockResolvedValue({
+      accessToken: "server-access-token",
+      accessTokenExpires: Date.now() - 1_000,
+    });
+    const readCookies = vi.fn().mockResolvedValue({
+      getAll: () => [
+        { name: "next-auth.session-token", value: "cookie-value" },
+      ],
+    });
+
+    const result = await getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+      },
+    );
+
+    expect(result).not.toBeNull();
+    expect((result as { accessToken?: string }).accessToken).toBeUndefined();
+  });
+
+  it("refreshes access token for recoverable JWT cookie", async () => {
+    const getter = vi.fn().mockResolvedValue({
+      user: {
+        id: "user-id",
+        username: "string",
+        avatarUrl: null,
+      },
+      expires: "2099-01-01T00:00:00.000Z",
+    });
+    const getJwtToken = vi.fn().mockResolvedValue({
+      accessToken: "server-access-token",
+      accessTokenExpires: Date.now() - 1_000,
+      refreshToken: "refresh-token",
+      error: undefined,
+    });
+    const readCookies = vi.fn().mockResolvedValue({
+      getAll: () => [
+        { name: "next-auth.session-token", value: "cookie-value" },
+      ],
+    });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: "refreshed-access-token",
+        refresh_token: "refresh-token-next",
+      }),
+    });
+
+    const result = await getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      },
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://backend:8000/api/v1/auth/refresh",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Cookie: "refresh_token=refresh-token",
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      accessToken: "refreshed-access-token",
+    });
+  });
+
+  it("does not hydrate access token when refresh attempt fails", async () => {
+    const getter = vi.fn().mockResolvedValue({
+      user: {
+        id: "user-id",
+        username: "string",
+        avatarUrl: null,
+      },
+      expires: "2099-01-01T00:00:00.000Z",
+    });
+    const getJwtToken = vi.fn().mockResolvedValue({
+      accessToken: "server-access-token",
+      accessTokenExpires: Date.now() - 1_000,
+      refreshToken: "refresh-token",
+      error: undefined,
+    });
+    const readCookies = vi.fn().mockResolvedValue({
+      getAll: () => [
+        { name: "next-auth.session-token", value: "cookie-value" },
+      ],
+    });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        detail: "Refresh failed",
+      }),
+    });
+
+    const result = await getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      },
+    );
+
+    expect(result).not.toBeNull();
+    expect((result as { accessToken?: string }).accessToken).toBeUndefined();
+  });
+
+  it("reuses shared refresh handoff after JWT rotation for server hydration", async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
+    const refreshedAccessToken = buildJwtWithExp(nowSeconds + 600);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          access_token: refreshedAccessToken,
+          refresh_token: "refresh-token-shared-next",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({ detail: "Refresh token revoked" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const jwtCallback = authOptions.callbacks?.jwt;
+    if (!jwtCallback) {
+      throw new Error("JWT callback is not configured");
+    }
+
+    await jwtCallback({
+      token: {
+        userId: "user-id",
+        username: "string",
+        avatarUrl: "avatar-key",
+        accessToken: expiredAccessToken,
+        refreshToken: "refresh-token-shared-old",
+        accessTokenExpires: (nowSeconds - 60) * 1000,
+      },
+    } as never);
+
+    const getter = vi.fn().mockResolvedValue({
+      user: {
+        id: "user-id",
+        username: "string",
+        avatarUrl: null,
+      },
+      expires: "2099-01-01T00:00:00.000Z",
+    });
+    const getJwtToken = vi.fn().mockResolvedValue({
+      accessToken: expiredAccessToken,
+      accessTokenExpires: (nowSeconds - 60) * 1000,
+      refreshToken: "refresh-token-shared-old",
+      error: undefined,
+    });
+    const readCookies = vi.fn().mockResolvedValue({
+      getAll: () => [
+        { name: "next-auth.session-token", value: "cookie-value" },
+      ],
+    });
+
+    const result = await getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      accessToken: refreshedAccessToken,
+    });
+  });
+
+  it("deduplicates concurrent refresh attempts for the same recoverable token", async () => {
+    const getter = vi.fn().mockResolvedValue({
+      user: {
+        id: "user-id",
+        username: "string",
+        avatarUrl: null,
+      },
+      expires: "2099-01-01T00:00:00.000Z",
+    });
+    const getJwtToken = vi.fn().mockResolvedValue({
+      accessToken: "expired-access-token",
+      accessTokenExpires: Date.now() - 1_000,
+      refreshToken: "refresh-token",
+      error: undefined,
+    });
+    const readCookies = vi.fn().mockResolvedValue({
+      getAll: () => [
+        { name: "next-auth.session-token", value: "cookie-value" },
+      ],
+    });
+    const fetchImpl = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return {
+        ok: true,
+        json: async () => ({
+          access_token: "refreshed-access-token",
+          refresh_token: "refresh-token-next",
+        }),
+      };
+    });
+
+    const first = getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      },
+    );
+    const second = getSessionServer(
+      getter as unknown as typeof nextAuth.getServerSession,
+      {
+        getJwtToken,
+        readCookies,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      },
+    );
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(firstResult).toMatchObject({
+      accessToken: "refreshed-access-token",
+    });
+    expect(secondResult).toMatchObject({
+      accessToken: "refreshed-access-token",
+    });
+  });
 });
 
 describe("JWT and session callbacks", () => {
@@ -314,8 +609,8 @@ describe("JWT and session callbacks", () => {
         username: "string",
         avatarUrl: "avatar-key",
       },
-      accessToken: "access-token",
     });
+    expect((session as Record<string, unknown>).accessToken).toBeUndefined();
     expect((session as Record<string, unknown>).refreshToken).toBeUndefined();
   });
 
@@ -347,9 +642,9 @@ describe("JWT and session callbacks", () => {
       "http://backend:8000/api/v1/auth/refresh",
       expect.objectContaining({
         method: "POST",
-        headers: {
+        headers: expect.objectContaining({
           Cookie: "refresh_token=refresh-token-old",
-        },
+        }),
       }),
     );
     expect(jwt).toMatchObject({
@@ -390,17 +685,24 @@ describe("JWT and session callbacks", () => {
     });
   });
 
-  it("refreshes again on later expiry checks without local cache reliance", async () => {
+  it("reuses a recent refresh handoff for stale refresh token retries", async () => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
     const refreshedAccessToken = buildJwtWithExp(nowSeconds + 600);
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        access_token: refreshedAccessToken,
-        refresh_token: "refresh-token-cached",
-      }),
-    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          access_token: refreshedAccessToken,
+          refresh_token: "refresh-token-cached",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({ detail: "Refresh token revoked" }),
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     const initialToken = {
@@ -423,7 +725,7 @@ describe("JWT and session callbacks", () => {
       },
     } as never);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(firstAttempt).toMatchObject({
       accessToken: refreshedAccessToken,
       refreshToken: "refresh-token-cached",
@@ -434,6 +736,119 @@ describe("JWT and session callbacks", () => {
       refreshToken: "refresh-token-cached",
       error: undefined,
     });
+  });
+
+  it("expires recent refresh handoff entries after TTL", async () => {
+    vi.useFakeTimers();
+    try {
+      const baseTime = new Date("2026-01-01T00:00:00.000Z");
+      vi.setSystemTime(baseTime);
+
+      const nowSeconds = Math.floor(baseTime.getTime() / 1000);
+      const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
+      const refreshedAccessToken = buildJwtWithExp(nowSeconds + 600);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            access_token: refreshedAccessToken,
+            refresh_token: "refresh-token-ttl-next",
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          json: async () => ({ detail: "Refresh token revoked" }),
+        });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const firstAttempt = await authOptions.callbacks?.jwt?.({
+        token: {
+          userId: "user-id",
+          username: "string",
+          avatarUrl: "avatar-key",
+          accessToken: expiredAccessToken,
+          refreshToken: "refresh-token-ttl-old",
+          accessTokenExpires: (nowSeconds - 60) * 1000,
+        },
+      } as never);
+      expect(firstAttempt).toMatchObject({
+        accessToken: refreshedAccessToken,
+        refreshToken: "refresh-token-ttl-next",
+        error: undefined,
+      });
+      expect(authModule.__internal.getRecentRefreshResultsSizeForTests()).toBe(
+        1,
+      );
+
+      vi.advanceTimersByTime(
+        authModule.__internal.getRecentRefreshResultTtlMsForTests() + 1,
+      );
+      expect(authModule.__internal.getRecentRefreshResultsSizeForTests()).toBe(
+        0,
+      );
+
+      const secondAttempt = await authOptions.callbacks?.jwt?.({
+        token: {
+          userId: "user-id",
+          username: "string",
+          avatarUrl: "avatar-key",
+          accessToken: buildJwtWithExp(nowSeconds - 90),
+          refreshToken: "refresh-token-ttl-old",
+          accessTokenExpires: (nowSeconds - 90) * 1000,
+        },
+      } as never);
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(secondAttempt).toMatchObject({
+        accessToken: undefined,
+        refreshToken: undefined,
+        error: "RefreshAccessTokenError",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds recent refresh handoff cache size", async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
+    const refreshedAccessToken = buildJwtWithExp(nowSeconds + 600);
+    const capacity =
+      authModule.__internal.getRecentRefreshResultCapacityForTests();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: refreshedAccessToken,
+        refresh_token: "refresh-token-cap-next",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (let index = 0; index < capacity + 5; index += 1) {
+      const jwt = await authOptions.callbacks?.jwt?.({
+        token: {
+          userId: "user-id",
+          username: "string",
+          avatarUrl: "avatar-key",
+          accessToken: expiredAccessToken,
+          refreshToken: `refresh-token-cap-${index}`,
+          accessTokenExpires: (nowSeconds - 60) * 1000,
+        },
+      } as never);
+
+      expect(jwt).toMatchObject({
+        accessToken: refreshedAccessToken,
+        refreshToken: "refresh-token-cap-next",
+        error: undefined,
+      });
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(capacity + 5);
+    expect(authModule.__internal.getRecentRefreshResultsSizeForTests()).toBe(
+      capacity,
+    );
   });
 
   it("invalidates token when refresh token is missing", async () => {
@@ -457,7 +872,7 @@ describe("JWT and session callbacks", () => {
     });
   });
 
-  it("keeps session state on transient refresh failure", async () => {
+  it("invalidates session when refresh is transient but access token is already expired", async () => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
     const fetchMock = vi.fn().mockResolvedValue({
@@ -479,7 +894,35 @@ describe("JWT and session callbacks", () => {
     } as never);
 
     expect(jwt).toMatchObject({
-      accessToken: expiredAccessToken,
+      accessToken: undefined,
+      refreshToken: undefined,
+      error: "RefreshAccessTokenError",
+    });
+  });
+
+  it("keeps session state on transient refresh failure while access token is still valid", async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const almostExpiredAccessToken = buildJwtWithExp(nowSeconds + 2);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({ detail: "Too Many Requests" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const jwt = await authOptions.callbacks?.jwt?.({
+      token: {
+        userId: "user-id",
+        username: "string",
+        avatarUrl: "avatar-key",
+        accessToken: almostExpiredAccessToken,
+        refreshToken: "refresh-token-transient",
+        accessTokenExpires: (nowSeconds + 2) * 1000,
+      },
+    } as never);
+
+    expect(jwt).toMatchObject({
+      accessToken: almostExpiredAccessToken,
       refreshToken: "refresh-token-transient",
       error: undefined,
     });
@@ -573,7 +1016,31 @@ describe("JWT and session callbacks", () => {
     });
   });
 
-  it("keeps cache helpers as no-op compatibility hooks", () => {
+  it("exposes cache helper hooks for deterministic tests", async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const expiredAccessToken = buildJwtWithExp(nowSeconds - 60);
+    const refreshedAccessToken = buildJwtWithExp(nowSeconds + 600);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: refreshedAccessToken,
+        refresh_token: "refresh-token-hook-next",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await authOptions.callbacks?.jwt?.({
+      token: {
+        userId: "user-id",
+        username: "string",
+        avatarUrl: "avatar-key",
+        accessToken: expiredAccessToken,
+        refreshToken: "refresh-token-hook-old",
+        accessTokenExpires: (nowSeconds - 60) * 1000,
+      },
+    } as never);
+
+    expect(authModule.__internal.getRecentRefreshResultsSizeForTests()).toBe(1);
     authModule.__internal.clearRecentRefreshResultsForTests();
     expect(authModule.__internal.getRecentRefreshResultsSizeForTests()).toBe(0);
   });
