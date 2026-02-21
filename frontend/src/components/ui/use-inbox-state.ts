@@ -19,6 +19,12 @@ export type FollowRequest = {
   occurred_at: string | null;
 };
 
+export type FollowRequestResolution = "approve" | "decline";
+
+type FollowRequestLockRef = {
+  current: boolean;
+};
+
 type NotificationsResponse = {
   notifications: InboxEvent[];
   follow_requests: FollowRequest[];
@@ -26,11 +32,13 @@ type NotificationsResponse = {
 
 type UseInboxStateArgs = {
   isOpen: boolean;
+  viewerUsername?: string;
 };
 
 export type LoadMode = "blocking" | "background";
 
 const DEFAULT_ERROR_MESSAGE = "Impossible de charger les notifications.";
+const FOLLOW_REQUEST_ERROR_MESSAGE = "Impossible de traiter cette demande.";
 
 export function resolveInboxLoadMode(hasLoaded: boolean): LoadMode {
   return hasLoaded ? "background" : "blocking";
@@ -68,7 +76,10 @@ export function collectDismissibleInboxIds(
   return uniqueIds;
 }
 
-async function parseErrorDetail(response: Response): Promise<string> {
+async function parseErrorDetail(
+  response: Response,
+  fallback: string = DEFAULT_ERROR_MESSAGE,
+): Promise<string> {
   try {
     const payload = (await response.json()) as {
       detail?: string;
@@ -79,20 +90,99 @@ async function parseErrorDetail(response: Response): Promise<string> {
   } catch {
     // Keep default error detail.
   }
-  return DEFAULT_ERROR_MESSAGE;
+  return fallback;
 }
 
-export function useInboxState({ isOpen }: UseInboxStateArgs) {
+function normalizeUsername(username?: string): string | null {
+  if (typeof username !== "string") {
+    return null;
+  }
+  const trimmed = username.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function claimFollowRequestResolutionLock(
+  lockRef: FollowRequestLockRef,
+): boolean {
+  if (lockRef.current) {
+    return false;
+  }
+  lockRef.current = true;
+  return true;
+}
+
+export function releaseFollowRequestResolutionLock(
+  lockRef: FollowRequestLockRef,
+): void {
+  lockRef.current = false;
+}
+
+export async function resolveFollowRequestMutation(
+  request: FollowRequest,
+  action: FollowRequestResolution,
+  viewerUsername?: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ success: boolean; error: string | null }> {
+  const currentViewerUsername = normalizeUsername(viewerUsername);
+  if (!currentViewerUsername) {
+    return {
+      success: false,
+      error: FOLLOW_REQUEST_ERROR_MESSAGE,
+    };
+  }
+
+  try {
+    const response = await fetchImpl(
+      `/api/users/${encodeURIComponent(currentViewerUsername)}/follow-requests`,
+      {
+        method: action === "approve" ? "POST" : "DELETE",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ requester_username: request.username }),
+      },
+    );
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: await parseErrorDetail(response, FOLLOW_REQUEST_ERROR_MESSAGE),
+      };
+    }
+
+    return {
+      success: true,
+      error: null,
+    };
+  } catch (resolveError) {
+    return {
+      success: false,
+      error:
+        resolveError instanceof Error && resolveError.message.length > 0
+          ? resolveError.message
+          : FOLLOW_REQUEST_ERROR_MESSAGE,
+    };
+  }
+}
+
+export function useInboxState({ isOpen, viewerUsername }: UseInboxStateArgs) {
   const [notifications, setNotifications] = useState<InboxEvent[]>([]);
   const [followRequests, setFollowRequests] = useState<FollowRequest[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [pendingFollowRequestId, setPendingFollowRequestId] = useState<
+    string | null
+  >(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const hasLoadedRef = useRef(false);
   const dismissedNotificationIdsRef = useRef<Set<string>>(new Set());
   const currentRequestRef = useRef<AbortController | null>(null);
+  const followRequestMutationLockRef = useRef(false);
 
   const loadInbox = useCallback(async (mode: LoadMode) => {
     currentRequestRef.current?.abort();
@@ -111,7 +201,7 @@ export function useInboxState({ isOpen }: UseInboxStateArgs) {
       setIsRefreshing(true);
     }
     if (mode === "blocking") {
-      setError(null);
+      setLoadError(null);
     }
 
     try {
@@ -144,7 +234,7 @@ export function useInboxState({ isOpen }: UseInboxStateArgs) {
       hasLoadedRef.current = true;
       setNotifications(nextNotifications);
       setFollowRequests(nextFollowRequests);
-      setError(null);
+      setLoadError(null);
     } catch (fetchError) {
       if (fetchError instanceof Error && fetchError.name === "AbortError") {
         return;
@@ -157,7 +247,7 @@ export function useInboxState({ isOpen }: UseInboxStateArgs) {
           fetchError instanceof Error && fetchError.message.length > 0
             ? fetchError.message
             : DEFAULT_ERROR_MESSAGE;
-        setError(detail);
+        setLoadError(detail);
       }
     } finally {
       if (currentRequestRef.current === controller) {
@@ -230,7 +320,7 @@ export function useInboxState({ isOpen }: UseInboxStateArgs) {
     }
     setNotifications([]);
     setFollowRequests([]);
-    setError(null);
+    setActionError(null);
     setIsMarkingAllRead(true);
 
     void fetch("/api/notifications", {
@@ -263,7 +353,7 @@ export function useInboxState({ isOpen }: UseInboxStateArgs) {
           persistError instanceof Error && persistError.message.length > 0
             ? persistError.message
             : DEFAULT_ERROR_MESSAGE;
-        setError(detail);
+        setActionError(detail);
       })
       .finally(() => {
         setIsMarkingAllRead(false);
@@ -282,6 +372,40 @@ export function useInboxState({ isOpen }: UseInboxStateArgs) {
     void loadInbox("background");
   }, [loadInbox]);
 
+  const resolveFollowRequest = useCallback(
+    async (request: FollowRequest, action: FollowRequestResolution) => {
+      if (!claimFollowRequestResolutionLock(followRequestMutationLockRef)) {
+        return;
+      }
+
+      setPendingFollowRequestId(request.id);
+      setActionError(null);
+
+      try {
+        const result = await resolveFollowRequestMutation(
+          request,
+          action,
+          viewerUsername,
+        );
+        if (!result.success) {
+          setActionError(result.error ?? FOLLOW_REQUEST_ERROR_MESSAGE);
+          return;
+        }
+
+        dismissedNotificationIdsRef.current.add(request.id);
+        setFollowRequests((currentFollowRequests) =>
+          currentFollowRequests.filter(
+            (followRequest) => followRequest.id !== request.id,
+          ),
+        );
+      } finally {
+        setPendingFollowRequestId(null);
+        releaseFollowRequestResolutionLock(followRequestMutationLockRef);
+      }
+    },
+    [viewerUsername],
+  );
+
   return {
     notifications,
     followRequests,
@@ -289,9 +413,12 @@ export function useInboxState({ isOpen }: UseInboxStateArgs) {
     isLoading,
     isRefreshing,
     isMarkingAllRead,
-    error,
+    pendingFollowRequestId,
+    loadError,
+    actionError,
     dismissNotification,
     markAllNotificationsRead,
     prefetchInbox,
+    resolveFollowRequest,
   };
 }

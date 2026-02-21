@@ -92,11 +92,17 @@ export function NavBar({ username, avatarKey }: NavBarProps) {
     isLoading: isInboxLoading,
     isRefreshing: isInboxRefreshing,
     isMarkingAllRead: isInboxMarkingAllRead,
-    error: inboxError,
+    pendingFollowRequestId,
+    loadError: inboxLoadError,
+    actionError: inboxActionError,
     dismissNotification,
     markAllNotificationsRead,
     prefetchInbox,
-  } = useInboxState({ isOpen: isDesktopInboxOpen || isMobileInboxOpen });
+    resolveFollowRequest,
+  } = useInboxState({
+    isOpen: isDesktopInboxOpen || isMobileInboxOpen,
+    viewerUsername: username,
+  });
 
   useSearchInputFocus({
     isSearching,
@@ -251,10 +257,13 @@ export function NavBar({ username, avatarKey }: NavBarProps) {
                 viewerUsername={username}
                 isLoading={isInboxLoading}
                 isRefreshing={isInboxRefreshing}
-                error={inboxError}
+                loadError={inboxLoadError}
+                actionError={inboxActionError}
                 onNotificationRead={dismissNotification}
                 onMarkAllRead={markAllNotificationsRead}
                 isMarkingAllRead={isInboxMarkingAllRead}
+                pendingFollowRequestId={pendingFollowRequestId}
+                onFollowRequestResolve={resolveFollowRequest}
                 onNavigate={() => setIsDesktopInboxOpen(false)}
                 className="space-y-2"
               />
@@ -506,10 +515,13 @@ export function NavBar({ username, avatarKey }: NavBarProps) {
           viewerUsername={username}
           isLoading={isInboxLoading}
           isRefreshing={isInboxRefreshing}
-          error={inboxError}
+          loadError={inboxLoadError}
+          actionError={inboxActionError}
           onNotificationRead={dismissNotification}
           onMarkAllRead={markAllNotificationsRead}
           isMarkingAllRead={isInboxMarkingAllRead}
+          pendingFollowRequestId={pendingFollowRequestId}
+          onFollowRequestResolve={resolveFollowRequest}
           onNavigate={() => setIsMobileInboxOpen(false)}
           className="space-y-2"
         />
