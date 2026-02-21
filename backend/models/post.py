@@ -23,7 +23,7 @@ class Post(SQLModel, table=True):
         )
     )
     image_key: str = Field(
-        sa_column=Column(String(255), nullable=False)
+        sa_column=Column(String(255), nullable=False, index=True)
     )
     caption: str | None = Field(
         default=None, sa_column=Column(Text, nullable=True)

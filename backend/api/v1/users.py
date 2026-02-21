@@ -26,6 +26,7 @@ from services.account_privacy import (
     is_follow_request_pending,
     is_following,
 )
+from services.auth import DEFAULT_AVATAR_OBJECT_KEY
 from services.account_blocks import (
     BlockState,
     apply_user_block,
@@ -402,6 +403,8 @@ async def update_me(
             uploaded_avatar_key is not None
             and previous_avatar_key is not None
             and previous_avatar_key != uploaded_avatar_key
+            and previous_avatar_key != DEFAULT_AVATAR_OBJECT_KEY
+            and not previous_avatar_key.startswith("avatars/default/")
         ):
             try:
                 await asyncio.to_thread(delete_object, previous_avatar_key)

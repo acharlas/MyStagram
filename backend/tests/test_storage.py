@@ -111,3 +111,30 @@ def test_delete_object_ignores_missing_key_errors(monkeypatch):
         storage.settings.minio_bucket,
         "posts/missing.jpg",
     )
+
+
+def test_create_presigned_get_url_calls_minio_client():
+    client = MagicMock()
+    client.presigned_get_object.return_value = "https://signed.local/object"
+
+    signed_url = storage.create_presigned_get_url(
+        "posts/demo.jpg",
+        expires_seconds=90,
+        client=client,
+    )
+
+    assert signed_url == "https://signed.local/object"
+    client.presigned_get_object.assert_called_once()
+    called_bucket, called_key = client.presigned_get_object.call_args.args[:2]
+    called_expires = client.presigned_get_object.call_args.kwargs["expires"]
+    assert called_bucket == storage.settings.minio_bucket
+    assert called_key == "posts/demo.jpg"
+    assert int(called_expires.total_seconds()) == 90
+
+
+def test_create_presigned_get_url_rejects_invalid_inputs():
+    with pytest.raises(ValueError):
+        storage.create_presigned_get_url("")
+
+    with pytest.raises(ValueError):
+        storage.create_presigned_get_url("posts/demo.jpg", expires_seconds=0)

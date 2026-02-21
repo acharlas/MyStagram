@@ -36,7 +36,7 @@ class User(SQLModel, table=True):
         default=None, sa_column=Column(Text, nullable=True)
     )
     avatar_key: str | None = Field(
-        default=None, sa_column=Column(String(255), nullable=True)
+        default=None, sa_column=Column(String(255), nullable=True, index=True)
     )
     is_private: bool = Field(
         default=False,
