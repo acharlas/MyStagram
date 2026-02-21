@@ -39,7 +39,9 @@ export function CharacterCountField({
     defaultValue,
     maxLength,
     onChange: handleChange,
-    className: multiline ? `${inputClassName} resize-none` : inputClassName,
+    className: multiline
+      ? `${inputClassName} resize-none whitespace-pre-wrap break-words [overflow-wrap:anywhere]`
+      : inputClassName,
   };
 
   return (

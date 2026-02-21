@@ -98,7 +98,7 @@ export default async function UserProfilePage({
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-2">
       <header className="ui-surface-card rounded-3xl border ui-border p-5 backdrop-blur sm:p-6">
         <div className="flex flex-col gap-6 text-center sm:flex-row sm:items-start sm:justify-between sm:text-left">
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:gap-6">
+          <div className="flex min-w-0 flex-col items-center gap-4 sm:flex-row sm:items-start sm:gap-6">
             <Avatar className="ui-surface-input flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border ui-border ring-2 ring-[color:var(--ui-border)]">
               {avatarUrl ? (
                 <AvatarImage
@@ -114,7 +114,7 @@ export default async function UserProfilePage({
                 </AvatarFallback>
               )}
             </Avatar>
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
               <h1 className="ui-text-strong text-2xl font-semibold tracking-tight sm:text-3xl">
                 @{profile.username}
               </h1>
@@ -124,7 +124,7 @@ export default async function UserProfilePage({
                 </p>
               ) : null}
               {profile.bio ? (
-                <p className="ui-text-muted max-w-xl whitespace-pre-wrap break-words text-sm leading-relaxed">
+                <p className="ui-text-muted max-w-xl whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-relaxed">
                   {profile.bio}
                 </p>
               ) : null}
