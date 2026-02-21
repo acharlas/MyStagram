@@ -50,7 +50,11 @@ describe("UserProfilePage error semantics", () => {
       data: [],
       nextOffset: null,
     });
-    fetchUserFollowStatusMock.mockResolvedValueOnce(false);
+    fetchUserFollowStatusMock.mockResolvedValueOnce({
+      is_following: false,
+      is_requested: false,
+      is_private: false,
+    });
 
     await expect(
       UserProfilePage({

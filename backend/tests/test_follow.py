@@ -8,7 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Follow
+from models import Follow, FollowRequest
 
 
 def make_user_payload(prefix: str) -> dict[str, str | None]:
@@ -36,6 +36,7 @@ async def test_follow_and_unfollow(async_client: AsyncClient, db_session: AsyncS
     follow_resp = await async_client.post(f"/api/v1/users/{followee_payload['username']}/follow")
     assert follow_resp.status_code == 200
     assert follow_resp.json()["detail"] in {"Followed", "Already following"}
+    assert follow_resp.json()["state"] == "following"
 
     result = await db_session.execute(select(Follow))
     follows = result.scalars().all()
@@ -44,6 +45,7 @@ async def test_follow_and_unfollow(async_client: AsyncClient, db_session: AsyncS
     unfollow_resp = await async_client.delete(f"/api/v1/users/{followee_payload['username']}/follow")
     assert unfollow_resp.status_code == 200
     assert unfollow_resp.json()["detail"] == "Unfollowed"
+    assert unfollow_resp.json()["state"] == "none"
 
     result = await db_session.execute(select(Follow))
     assert result.scalars().all() == []
@@ -178,6 +180,48 @@ async def test_followers_list_visible_to_non_followers(async_client: AsyncClient
 
 
 @pytest.mark.asyncio
+async def test_private_follow_graph_hidden_from_non_followers(async_client: AsyncClient):
+    alice = make_user_payload("alice")
+    bob = make_user_payload("bob")
+    eve = make_user_payload("eve")
+
+    for user in (alice, bob, eve):
+        await async_client.post("/api/v1/auth/register", json=user)
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": alice["username"], "password": alice["password"]},
+    )
+    await async_client.patch("/api/v1/me", data={"is_private": "true"})
+    await async_client.post("/api/v1/auth/logout")
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": bob["username"], "password": bob["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{alice['username']}/follow")
+    await async_client.post("/api/v1/auth/logout")
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": alice["username"], "password": alice["password"]},
+    )
+    await async_client.post(
+        f"/api/v1/users/{alice['username']}/follow-requests/{bob['username']}/approve"
+    )
+    await async_client.post("/api/v1/auth/logout")
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": eve["username"], "password": eve["password"]},
+    )
+    followers_resp = await async_client.get(f"/api/v1/users/{alice['username']}/followers")
+    following_resp = await async_client.get(f"/api/v1/users/{alice['username']}/following")
+    assert followers_resp.status_code == 404
+    assert following_resp.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_follow_status_returns_boolean(async_client: AsyncClient):
     alice = make_user_payload("alice")
     bob = make_user_payload("bob")
@@ -198,6 +242,123 @@ async def test_follow_status_returns_boolean(async_client: AsyncClient):
     after_follow = await async_client.get(f"/api/v1/users/{alice['username']}/follow-status")
     assert after_follow.status_code == 200
     assert after_follow.json()["is_following"] is True
+
+
+@pytest.mark.asyncio
+async def test_private_account_follow_request_flow(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+):
+    owner = make_user_payload("owner")
+    requester = make_user_payload("requester")
+
+    await async_client.post("/api/v1/auth/register", json=owner)
+    await async_client.post("/api/v1/auth/register", json=requester)
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": owner["username"], "password": owner["password"]},
+    )
+    update_private = await async_client.patch(
+        "/api/v1/me",
+        data={"is_private": "true"},
+    )
+    assert update_private.status_code == 200
+    assert update_private.json()["is_private"] is True
+
+    await async_client.post("/api/v1/auth/logout")
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": requester["username"], "password": requester["password"]},
+    )
+
+    follow_response = await async_client.post(
+        f"/api/v1/users/{owner['username']}/follow"
+    )
+    assert follow_response.status_code == 200
+    assert follow_response.json()["detail"] == "Follow request sent"
+    assert follow_response.json()["state"] == "requested"
+
+    status_response = await async_client.get(
+        f"/api/v1/users/{owner['username']}/follow-status"
+    )
+    assert status_response.status_code == 200
+    assert status_response.json()["is_following"] is False
+    assert status_response.json()["is_requested"] is True
+    assert status_response.json()["is_private"] is True
+
+    follow_rows = (await db_session.execute(select(Follow))).scalars().all()
+    request_rows = (await db_session.execute(select(FollowRequest))).scalars().all()
+    assert follow_rows == []
+    assert len(request_rows) == 1
+
+    cancel_response = await async_client.delete(
+        f"/api/v1/users/{owner['username']}/follow"
+    )
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["state"] == "none"
+
+    request_rows = (await db_session.execute(select(FollowRequest))).scalars().all()
+    assert request_rows == []
+
+
+@pytest.mark.asyncio
+async def test_private_follow_request_can_be_approved(async_client: AsyncClient):
+    owner = make_user_payload("owner")
+    requester = make_user_payload("requester")
+
+    await async_client.post("/api/v1/auth/register", json=owner)
+    await async_client.post("/api/v1/auth/register", json=requester)
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": owner["username"], "password": owner["password"]},
+    )
+    await async_client.patch(
+        "/api/v1/me",
+        data={"is_private": "true"},
+    )
+    await async_client.post("/api/v1/auth/logout")
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": requester["username"], "password": requester["password"]},
+    )
+    await async_client.post(f"/api/v1/users/{owner['username']}/follow")
+    await async_client.post("/api/v1/auth/logout")
+
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": owner["username"], "password": owner["password"]},
+    )
+    requests_response = await async_client.get(
+        f"/api/v1/users/{owner['username']}/follow-requests"
+    )
+    assert requests_response.status_code == 200
+    assert [item["username"] for item in requests_response.json()] == [
+        requester["username"]
+    ]
+
+    approve_response = await async_client.post(
+        f"/api/v1/users/{owner['username']}/follow-requests/{requester['username']}/approve"
+    )
+    assert approve_response.status_code == 200
+    assert approve_response.json()["detail"] in {
+        "Follow request approved",
+        "Already following",
+    }
+
+    await async_client.post("/api/v1/auth/logout")
+    await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": requester["username"], "password": requester["password"]},
+    )
+    status_response = await async_client.get(
+        f"/api/v1/users/{owner['username']}/follow-status"
+    )
+    assert status_response.status_code == 200
+    assert status_response.json()["is_following"] is True
+    assert status_response.json()["is_requested"] is False
 
 
 @pytest.mark.asyncio
@@ -225,6 +386,8 @@ async def test_follow_is_idempotent_under_concurrency(
     assert second.status_code == 200
     assert first.json()["detail"] in {"Followed", "Already following"}
     assert second.json()["detail"] in {"Followed", "Already following"}
+    assert first.json()["state"] == "following"
+    assert second.json()["state"] == "following"
 
     result = await db_session.execute(select(Follow))
     follows = result.scalars().all()

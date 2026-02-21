@@ -9,6 +9,7 @@ import {
   fetchUserPostsPage,
   fetchUserProfile,
   followUserRequest,
+  resolveFollowRequest,
   unfollowUserRequest,
 } from "../../lib/api/users";
 
@@ -301,11 +302,19 @@ describe("fetchUserConnections", () => {
 
 describe("fetchUserFollowStatus", () => {
   it("returns follow status when backend call succeeds", async () => {
-    apiServerFetchMock.mockResolvedValueOnce({ is_following: true });
+    apiServerFetchMock.mockResolvedValueOnce({
+      is_following: true,
+      is_requested: false,
+      is_private: true,
+    });
 
     const result = await fetchUserFollowStatus("demo", "token-1");
 
-    expect(result).toBe(true);
+    expect(result).toEqual({
+      is_following: true,
+      is_requested: false,
+      is_private: true,
+    });
     expect(apiServerFetchMock).toHaveBeenCalledWith(
       "/api/v1/users/demo/follow-status",
       expect.objectContaining({
@@ -319,7 +328,11 @@ describe("fetchUserFollowStatus", () => {
   it("returns false when no token is provided", async () => {
     const result = await fetchUserFollowStatus("demo");
 
-    expect(result).toBe(false);
+    expect(result).toEqual({
+      is_following: false,
+      is_requested: false,
+      is_private: false,
+    });
     expect(apiServerFetchMock).not.toHaveBeenCalled();
   });
 
@@ -347,7 +360,7 @@ describe("followUserRequest", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ detail: "Followed" }),
+      json: async () => ({ detail: "Followed", state: "following" }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -357,6 +370,7 @@ describe("followUserRequest", () => {
       success: true,
       status: 200,
       detail: "Followed",
+      state: "following",
     });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/v1/users/demo/follow"),
@@ -381,6 +395,7 @@ describe("followUserRequest", () => {
       success: false,
       status: 404,
       detail: "User not found",
+      state: "none",
     });
   });
 });
@@ -390,7 +405,7 @@ describe("unfollowUserRequest", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ detail: "Unfollowed" }),
+      json: async () => ({ detail: "Unfollowed", state: "none" }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -400,6 +415,7 @@ describe("unfollowUserRequest", () => {
       success: true,
       status: 200,
       detail: "Unfollowed",
+      state: "none",
     });
   });
 
@@ -412,5 +428,39 @@ describe("unfollowUserRequest", () => {
     expect(result.success).toBe(false);
     expect(result.status).toBe(500);
     expect(result.detail).toBe("network");
+    expect(result.state).toBe("none");
+  });
+});
+
+describe("resolveFollowRequest", () => {
+  it("approves request when backend accepts mutation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ detail: "Follow request approved" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await resolveFollowRequest(
+      "demo",
+      "requester",
+      "approve",
+      "access-123",
+    );
+
+    expect(result).toEqual({
+      success: true,
+      status: 200,
+      detail: "Follow request approved",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/api/v1/users/demo/follow-requests/requester/approve",
+      ),
+      expect.objectContaining({
+        method: "POST",
+        headers: { Cookie: "access_token=access-123" },
+      }),
+    );
   });
 });

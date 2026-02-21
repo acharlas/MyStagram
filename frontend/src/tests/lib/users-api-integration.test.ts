@@ -219,19 +219,34 @@ describe("user API integration behavior", () => {
 
     const result = await fetchUserFollowStatus("demo");
 
-    expect(result).toBe(false);
+    expect(result).toEqual({
+      is_following: false,
+      is_requested: false,
+      is_private: false,
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("fetchUserFollowStatus returns payload on success", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(jsonResponse({ is_following: true }, 200));
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          is_following: true,
+          is_requested: false,
+          is_private: true,
+        },
+        200,
+      ),
+    );
     globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 
     const result = await fetchUserFollowStatus("demo", "token-1");
 
-    expect(result).toBe(true);
+    expect(result).toEqual({
+      is_following: true,
+      is_requested: false,
+      is_private: true,
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://backend:8000/api/v1/users/demo/follow-status",
       expect.objectContaining({

@@ -15,8 +15,10 @@ type RouteParams = {
   params: Promise<{ username: string }> | { username: string };
 };
 
-function parseConnectionsKind(value: string | null): UserConnectionsKind | null {
-  if (value === "followers" || value === "following") {
+function parseConnectionsKind(
+  value: string | null,
+): UserConnectionsKind | null {
+  if (value === "followers" || value === "following" || value === "requests") {
     return value;
   }
   return null;

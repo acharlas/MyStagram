@@ -23,12 +23,14 @@ def test_user_profile_public_excludes_email():
     profile = UserProfilePublic.model_validate(user)
     assert profile.username == user.username
     assert profile.name == user.name
+    assert profile.is_private is False
     assert not hasattr(profile, "email")
 
 
 def test_user_profile_private_includes_email():
-    user = make_user()
+    user = make_user(is_private=True)
     profile = UserProfilePrivate.model_validate(user)
     assert profile.username == user.username
     assert profile.email == user.email
     assert profile.avatar_key == user.avatar_key
+    assert profile.is_private is True

@@ -17,6 +17,7 @@ const CONNECTIONS_PAGE_SIZE = 20;
 
 type ConnectionsPanelProps = {
   username: string;
+  isOwnProfile?: boolean;
 };
 
 type ConnectionsPageMap = Record<
@@ -27,15 +28,37 @@ type ConnectionsPageMap = Record<
 type StringByKind = Record<UserConnectionsKind, string | null>;
 type NumberByKind = Record<UserConnectionsKind, number>;
 
+function parseErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+  if (error instanceof Error && error.message.length > 0) {
+    return error.message;
+  }
+  return "Impossible de charger cette liste pour le moment.";
+}
+
 function panelLabel(panel: UserConnectionsKind): string {
-  return panel === "followers" ? "Followers" : "Following";
+  if (panel === "followers") {
+    return "Followers";
+  }
+  if (panel === "following") {
+    return "Following";
+  }
+  return "Requests";
 }
 
 function profileHref(username: string): string {
   return `/users/${encodeURIComponent(username)}`;
 }
 
-export function ConnectionsPanel({ username }: ConnectionsPanelProps) {
+export function ConnectionsPanel({
+  username,
+  isOwnProfile = false,
+}: ConnectionsPanelProps) {
+  const availablePanels: UserConnectionsKind[] = isOwnProfile
+    ? ["followers", "following", "requests"]
+    : ["followers", "following"];
   const [isClient, setIsClient] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [activePanel, setActivePanel] =
@@ -43,15 +66,21 @@ export function ConnectionsPanel({ username }: ConnectionsPanelProps) {
   const [offsetByKind, setOffsetByKind] = useState<NumberByKind>(() => ({
     followers: 0,
     following: 0,
+    requests: 0,
   }));
   const [pageByKind, setPageByKind] = useState<ConnectionsPageMap>(() => ({
     followers: null,
     following: null,
+    requests: null,
   }));
   const [errorByKind, setErrorByKind] = useState<StringByKind>(() => ({
     followers: null,
     following: null,
+    requests: null,
   }));
+  const [pendingRequestUsername, setPendingRequestUsername] = useState<
+    string | null
+  >(null);
 
   const activeOffset = offsetByKind[activePanel];
   const activePage = pageByKind[activePanel];
@@ -93,10 +122,7 @@ export function ConnectionsPanel({ username }: ConnectionsPanelProps) {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
         }
-        const message =
-          error instanceof ApiError
-            ? error.message
-            : "Impossible de charger cette liste pour le moment.";
+        const message = parseErrorMessage(error);
         setErrorByKind((previous) => ({ ...previous, [activePanel]: message }));
       });
 
@@ -134,6 +160,64 @@ export function ConnectionsPanel({ username }: ConnectionsPanelProps) {
     }));
   };
 
+  const resolveRequest = async (
+    requesterUsername: string,
+    action: "approve" | "decline",
+  ) => {
+    if (!isOwnProfile || activePanel !== "requests" || pendingRequestUsername) {
+      return;
+    }
+
+    setPendingRequestUsername(requesterUsername);
+    setErrorByKind((previous) => ({ ...previous, requests: null }));
+    try {
+      const response = await fetch(
+        `/api/users/${encodeURIComponent(username)}/follow-requests`,
+        {
+          method: action === "approve" ? "POST" : "DELETE",
+          cache: "no-store",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ requester_username: requesterUsername }),
+        },
+      );
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          detail?: string;
+        } | null;
+        throw new Error(
+          typeof payload?.detail === "string" && payload.detail.length > 0
+            ? payload.detail
+            : "Impossible de traiter cette demande.",
+        );
+      }
+      setPageByKind((previous) => {
+        const requestsPage = previous.requests;
+        if (!requestsPage) {
+          return previous;
+        }
+        return {
+          ...previous,
+          requests: {
+            ...requestsPage,
+            data: requestsPage.data.filter(
+              (candidate) => candidate.username !== requesterUsername,
+            ),
+          },
+        };
+      });
+    } catch (error) {
+      setErrorByKind((previous) => ({
+        ...previous,
+        requests: parseErrorMessage(error),
+      }));
+    } finally {
+      setPendingRequestUsername(null);
+    }
+  };
+
   return (
     <>
       <div className="flex items-center justify-center gap-3 text-sm sm:justify-start">
@@ -151,6 +235,15 @@ export function ConnectionsPanel({ username }: ConnectionsPanelProps) {
         >
           Following
         </button>
+        {isOwnProfile ? (
+          <button
+            type="button"
+            onClick={() => openPanel("requests")}
+            className="ui-focus-ring ui-surface-input ui-text-muted rounded-full border ui-border px-3 py-1.5 font-medium transition hover:border-[color:var(--ui-border-strong)] hover:text-[color:var(--ui-text-strong)] focus:outline-none"
+          >
+            Requests
+          </button>
+        ) : null}
       </div>
 
       {!isClient || !isOpen
@@ -183,7 +276,7 @@ export function ConnectionsPanel({ username }: ConnectionsPanelProps) {
                     </button>
                   </div>
                   <div className="mt-3 inline-flex rounded-full border ui-border p-1">
-                    {(["followers", "following"] as const).map((panel) => {
+                    {availablePanels.map((panel) => {
                       const isActive = panel === activePanel;
                       return (
                         <button
@@ -217,39 +310,76 @@ export function ConnectionsPanel({ username }: ConnectionsPanelProps) {
                     <p className="ui-surface-input ui-text-subtle rounded-2xl border ui-border p-4 text-sm">
                       {activePanel === "followers"
                         ? "Aucun follower pour le moment."
-                        : "Ce compte ne suit encore personne."}
+                        : activePanel === "following"
+                          ? "Ce compte ne suit encore personne."
+                          : "Aucune demande en attente."}
                     </p>
                   ) : (
                     <ul className="space-y-2">
                       {activePage.data.map((user) => {
                         const userDisplayName = user.name ?? user.username;
                         const userAvatarUrl = buildAvatarUrl(user.avatar_key);
+                        const isRequestPanel = activePanel === "requests";
+                        const isResolvingRequest =
+                          pendingRequestUsername === user.username;
                         return (
                           <li key={user.id}>
-                            <Link
-                              href={profileHref(user.username)}
-                              className="ui-focus-ring ui-surface-input flex items-center gap-3 rounded-2xl border ui-border p-3 transition hover:border-[color:var(--ui-border-strong)] focus:outline-none"
-                            >
-                              <Avatar className="h-11 w-11 overflow-hidden rounded-full border ui-border">
-                                <AvatarImage
-                                  src={userAvatarUrl}
-                                  alt={`Avatar de ${userDisplayName}`}
-                                  width={44}
-                                  height={44}
-                                  className="h-full w-full object-cover"
-                                />
-                              </Avatar>
-                              <div className="min-w-0">
-                                <p className="ui-text-strong truncate text-sm font-semibold">
-                                  @{user.username}
-                                </p>
-                                {user.name ? (
-                                  <p className="ui-text-muted truncate text-xs">
-                                    {user.name}
+                            <div className="ui-surface-input flex items-center gap-3 rounded-2xl border ui-border p-3">
+                              <Link
+                                href={profileHref(user.username)}
+                                className="ui-focus-ring flex min-w-0 flex-1 items-center gap-3 rounded-xl focus:outline-none"
+                              >
+                                <Avatar className="h-11 w-11 overflow-hidden rounded-full border ui-border">
+                                  <AvatarImage
+                                    src={userAvatarUrl}
+                                    alt={`Avatar de ${userDisplayName}`}
+                                    width={44}
+                                    height={44}
+                                    className="h-full w-full object-cover"
+                                  />
+                                </Avatar>
+                                <div className="min-w-0">
+                                  <p className="ui-text-strong truncate text-sm font-semibold">
+                                    @{user.username}
                                   </p>
-                                ) : null}
-                              </div>
-                            </Link>
+                                  {user.name ? (
+                                    <p className="ui-text-muted truncate text-xs">
+                                      {user.name}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </Link>
+                              {isRequestPanel ? (
+                                <div className="ml-auto flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={isResolvingRequest}
+                                    onClick={() =>
+                                      void resolveRequest(
+                                        user.username,
+                                        "approve",
+                                      )
+                                    }
+                                    className="ui-focus-ring ui-accent-button rounded-full px-3 py-1 text-xs font-semibold transition focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    Accepter
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isResolvingRequest}
+                                    onClick={() =>
+                                      void resolveRequest(
+                                        user.username,
+                                        "decline",
+                                      )
+                                    }
+                                    className="ui-focus-ring ui-surface-input ui-text-muted rounded-full border ui-border px-3 py-1 text-xs font-semibold transition hover:border-[color:var(--ui-border-strong)] hover:text-[color:var(--ui-text-strong)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    Refuser
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
                           </li>
                         );
                       })}

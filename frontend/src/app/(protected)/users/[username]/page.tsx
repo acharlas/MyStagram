@@ -30,16 +30,7 @@ export default async function UserProfilePage({
   const accessToken = session?.accessToken as string | undefined;
   const viewerUsername = session?.user?.username ?? null;
 
-  const profilePromise = fetchUserProfile(username, accessToken);
-  const postsPagePromise = fetchUserPostsPage(
-    username,
-    {
-      limit: USER_POSTS_PAGE_SIZE,
-      offset: 0,
-    },
-    accessToken,
-  );
-  const profile = await profilePromise;
+  const profile = await fetchUserProfile(username, accessToken);
 
   if (!profile) {
     notFound();
@@ -50,28 +41,48 @@ export default async function UserProfilePage({
   const avatarUrl = profile.avatar_key
     ? buildImageUrl(profile.avatar_key)
     : null;
+  const isPrivateAccount = Boolean(profile.is_private);
   const isOwnProfile = viewerUsername === profile.username;
+  let followStatus = {
+    is_following: false,
+    is_requested: false,
+    is_private: isPrivateAccount,
+  };
 
-  let isFollowing = false;
-  const followStatusPromise =
-    !isOwnProfile && accessToken && viewerUsername
-      ? fetchUserFollowStatus(username, accessToken)
-      : Promise.resolve(false);
+  if (!isOwnProfile && accessToken && viewerUsername) {
+    try {
+      followStatus = await fetchUserFollowStatus(username, accessToken);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        notFound();
+      }
+      throw error;
+    }
+  }
+
+  const canViewPosts =
+    isOwnProfile || !isPrivateAccount || followStatus.is_following;
 
   let postsPage: Awaited<ReturnType<typeof fetchUserPostsPage>> = {
     data: [],
     nextOffset: null,
   };
-  try {
-    [postsPage, isFollowing] = await Promise.all([
-      postsPagePromise,
-      followStatusPromise,
-    ]);
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 404) {
-      notFound();
+  if (canViewPosts) {
+    try {
+      postsPage = await fetchUserPostsPage(
+        username,
+        {
+          limit: USER_POSTS_PAGE_SIZE,
+          offset: 0,
+        },
+        accessToken,
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        notFound();
+      }
+      throw error;
     }
-    throw error;
   }
 
   return (
@@ -108,16 +119,27 @@ export default async function UserProfilePage({
                   {profile.bio}
                 </p>
               ) : null}
-              <ConnectionsPanel username={profile.username} />
+              <ConnectionsPanel
+                username={profile.username}
+                isOwnProfile={isOwnProfile}
+              />
               {!isOwnProfile && viewerUsername && accessToken ? (
                 <FollowButton
-                  initiallyFollowing={isFollowing}
+                  initiallyFollowing={followStatus.is_following}
+                  initiallyRequested={followStatus.is_requested}
+                  isPrivateAccount={isPrivateAccount}
                   followAction={followUserAction.bind(null, profile.username)}
                   unfollowAction={unfollowUserAction.bind(
                     null,
                     profile.username,
                   )}
                 />
+              ) : null}
+              {!canViewPosts ? (
+                <p className="ui-surface-input ui-text-muted rounded-2xl border ui-border px-4 py-3 text-sm">
+                  Ce compte est privé. Suivez ce profil pour voir ses
+                  publications.
+                </p>
               ) : null}
             </div>
           </div>
@@ -134,12 +156,14 @@ export default async function UserProfilePage({
         </div>
       </header>
 
-      <UserPostsGrid
-        username={profile.username}
-        initialPosts={postsPage.data}
-        initialNextOffset={postsPage.nextOffset}
-        pageSize={USER_POSTS_PAGE_SIZE}
-      />
+      {canViewPosts ? (
+        <UserPostsGrid
+          username={profile.username}
+          initialPosts={postsPage.data}
+          initialNextOffset={postsPage.nextOffset}
+          pageSize={USER_POSTS_PAGE_SIZE}
+        />
+      ) : null}
     </section>
   );
 }

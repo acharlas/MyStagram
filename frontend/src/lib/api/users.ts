@@ -12,6 +12,7 @@ export type UserProfile = {
   name: string | null;
   bio: string | null;
   avatar_key?: string | null;
+  is_private?: boolean;
 };
 
 export type UserGridPost = {
@@ -28,15 +29,29 @@ export type UserProfilePublic = {
   name: string | null;
   bio: string | null;
   avatar_key: string | null;
+  is_private?: boolean;
 };
 
-export type UserConnectionsKind = "followers" | "following";
+export type UserConnectionsKind = "followers" | "following" | "requests";
 
 export type FollowStatusResponse = {
   is_following: boolean;
+  is_requested: boolean;
+  is_private: boolean;
 };
 
+export type FollowMutationState = "none" | "following" | "requested";
+
 export type FollowMutationResult = {
+  success: boolean;
+  status: number;
+  detail: string | null;
+  state: FollowMutationState;
+};
+
+export type FollowRequestResolution = "approve" | "decline";
+
+export type FollowRequestMutationResult = {
   success: boolean;
   status: number;
   detail: string | null;
@@ -84,7 +99,8 @@ function buildConnectionPath(
     params.set("offset", String(offset));
   }
 
-  const basePath = `${buildProfilePath(username)}/${kind}`;
+  const kindPath = kind === "requests" ? "follow-requests" : kind;
+  const basePath = `${buildProfilePath(username)}/${kindPath}`;
   const query = params.toString();
   return query.length > 0 ? `${basePath}?${query}` : basePath;
 }
@@ -230,10 +246,14 @@ export function fetchUserConnections(
 export async function fetchUserFollowStatus(
   username: string,
   accessToken?: string,
-): Promise<boolean> {
+): Promise<FollowStatusResponse> {
   // Contract: missing local auth state means "not following"; backend failures propagate.
   if (!accessToken) {
-    return false;
+    return {
+      is_following: false,
+      is_requested: false,
+      is_private: false,
+    };
   }
 
   const result = await apiServerFetch<FollowStatusResponse>(
@@ -243,7 +263,11 @@ export async function fetchUserFollowStatus(
       headers: buildHeaders(accessToken),
     },
   );
-  return result.is_following;
+  return {
+    is_following: result.is_following === true,
+    is_requested: result.is_requested === true,
+    is_private: result.is_private === true,
+  };
 }
 
 function buildFollowUrl(username: string): string {
@@ -254,11 +278,132 @@ function buildFollowUrl(username: string): string {
   ).toString();
 }
 
+function isFollowMutationState(value: unknown): value is FollowMutationState {
+  return value === "none" || value === "following" || value === "requested";
+}
+
+async function readFollowMutationPayload(response: Response): Promise<{
+  detail: string | null;
+  state: FollowMutationState | null;
+}> {
+  try {
+    const payload = (await response.json()) as {
+      detail?: unknown;
+      state?: unknown;
+    };
+    return {
+      detail: typeof payload?.detail === "string" ? payload.detail : null,
+      state: isFollowMutationState(payload?.state) ? payload.state : null,
+    };
+  } catch {
+    return {
+      detail: null,
+      state: null,
+    };
+  }
+}
+
 async function mutateFollow(
   username: string,
   method: "POST" | "DELETE",
   accessToken?: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<FollowMutationResult> {
+  if (!accessToken) {
+    return {
+      success: false,
+      status: 401,
+      detail: "Not authenticated",
+      state: "none",
+    };
+  }
+
+  const url = buildFollowUrl(username);
+
+  try {
+    const response = await fetchImpl(url, {
+      method,
+      headers: {
+        Cookie: `access_token=${accessToken}`,
+      },
+      cache: "no-store",
+    });
+    const payload = await readFollowMutationPayload(response);
+
+    if (!response.ok) {
+      return {
+        success: false,
+        status: response.status,
+        detail: payload.detail,
+        state: payload.state ?? "none",
+      };
+    }
+
+    if (payload.state === null) {
+      return {
+        success: false,
+        status: 502,
+        detail: payload.detail ?? "Backend response is missing follow state",
+        state: "none",
+      };
+    }
+
+    return {
+      success: true,
+      status: response.status,
+      detail: payload.detail,
+      state: payload.state,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      status: 500,
+      detail: error instanceof Error ? error.message : "Unknown error",
+      state: "none",
+    };
+  }
+}
+
+export function followUserRequest(
+  username: string,
+  accessToken?: string,
+  fetchImpl?: typeof fetch,
+): Promise<FollowMutationResult> {
+  return mutateFollow(username, "POST", accessToken, fetchImpl);
+}
+
+export function unfollowUserRequest(
+  username: string,
+  accessToken?: string,
+  fetchImpl?: typeof fetch,
+): Promise<FollowMutationResult> {
+  return mutateFollow(username, "DELETE", accessToken, fetchImpl);
+}
+
+function buildFollowRequestResolutionUrl(
+  username: string,
+  requesterUsername: string,
+  action: FollowRequestResolution,
+): string {
+  const base = process.env.BACKEND_API_URL ?? "http://backend:8000";
+  if (action === "approve") {
+    return new URL(
+      `/api/v1/users/${encodeURIComponent(username)}/follow-requests/${encodeURIComponent(requesterUsername)}/approve`,
+      base,
+    ).toString();
+  }
+  return new URL(
+    `/api/v1/users/${encodeURIComponent(username)}/follow-requests/${encodeURIComponent(requesterUsername)}`,
+    base,
+  ).toString();
+}
+
+export async function resolveFollowRequest(
+  username: string,
+  requesterUsername: string,
+  action: FollowRequestResolution,
+  accessToken?: string,
+): Promise<FollowRequestMutationResult> {
   if (!accessToken) {
     return {
       success: false,
@@ -267,7 +412,12 @@ async function mutateFollow(
     };
   }
 
-  const url = buildFollowUrl(username);
+  const method = action === "approve" ? "POST" : "DELETE";
+  const url = buildFollowRequestResolutionUrl(
+    username,
+    requesterUsername,
+    action,
+  );
 
   try {
     const response = await fetch(url, {
@@ -307,20 +457,6 @@ async function mutateFollow(
       detail: error instanceof Error ? error.message : "Unknown error",
     };
   }
-}
-
-export function followUserRequest(
-  username: string,
-  accessToken?: string,
-): Promise<FollowMutationResult> {
-  return mutateFollow(username, "POST", accessToken);
-}
-
-export function unfollowUserRequest(
-  username: string,
-  accessToken?: string,
-): Promise<FollowMutationResult> {
-  return mutateFollow(username, "DELETE", accessToken);
 }
 
 export async function searchUsers(

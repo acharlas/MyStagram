@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, String, Text, func
+from sqlalchemy import Boolean, Column, DateTime, String, Text, func, text
 from sqlmodel import Field, SQLModel
 
 
@@ -37,6 +37,14 @@ class User(SQLModel, table=True):
     )
     avatar_key: str | None = Field(
         default=None, sa_column=Column(String(255), nullable=True)
+    )
+    is_private: bool = Field(
+        default=False,
+        sa_column=Column(
+            Boolean,
+            nullable=False,
+            server_default=text("false"),
+        ),
     )
     created_at: datetime = Field(
         sa_column=Column(

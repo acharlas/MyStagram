@@ -44,9 +44,11 @@ export async function updateProfileAction(formData: FormData): Promise<void> {
   const nameRaw = formData.get("name");
   const bioRaw = formData.get("bio");
   const avatarRaw = formData.get("avatar");
+  const isPrivateRaw = formData.get("is_private");
 
   const name = typeof nameRaw === "string" ? nameRaw.trim() : "";
   const bio = typeof bioRaw === "string" ? bioRaw.trim() : "";
+  const isPrivate = isPrivateRaw === "true";
 
   if (name.length > SETTINGS_DISPLAY_NAME_MAX_LENGTH) {
     redirectToSettingsError(
@@ -78,6 +80,7 @@ export async function updateProfileAction(formData: FormData): Promise<void> {
   const payload = new FormData();
   payload.append("name", name);
   payload.append("bio", bio);
+  payload.append("is_private", isPrivate ? "true" : "false");
   if (avatarFile) {
     payload.append("avatar", avatarFile, avatarFile.name);
   }

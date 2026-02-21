@@ -98,11 +98,11 @@ export async function getWhoToFollowSuggestions(
   await Promise.all(
     candidates.map(async (user) => {
       try {
-        const isFollowing = await fetchUserFollowStatus(
+        const followStatus = await fetchUserFollowStatus(
           user.username,
           accessToken,
         );
-        if (isFollowing) {
+        if (followStatus.is_following) {
           followedUsernames.add(user.username);
         }
       } catch (error) {

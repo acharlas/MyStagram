@@ -28,8 +28,8 @@ vi.mock("@/lib/api/client", () => ({
   ApiError: ApiErrorMock,
 }));
 
-import { ApiError } from "@/lib/api/client";
 import { GET } from "@/app/api/users/[username]/connections/route";
+import { ApiError } from "@/lib/api/client";
 
 describe("user connections route", () => {
   it("returns 401 when no access token exists", async () => {
@@ -93,6 +93,27 @@ describe("user connections route", () => {
     expect(response.status).toBe(200);
     expect(payload.nextOffset).toBe(20);
     expect(payload.data[0]?.username).toBe("bob");
+  });
+
+  it("proxies requests kind for private-account approvals", async () => {
+    getSessionServerMock.mockResolvedValueOnce({ accessToken: "token-1" });
+    fetchUserConnectionPageMock.mockResolvedValueOnce({
+      data: [],
+      nextOffset: null,
+    });
+
+    const request = new NextRequest(
+      "http://localhost/api/users/alice/connections?kind=requests",
+    );
+    const response = await GET(request, { params: { username: "alice" } });
+
+    expect(fetchUserConnectionPageMock).toHaveBeenCalledWith(
+      "alice",
+      "requests",
+      { limit: 20, offset: 0 },
+      "token-1",
+    );
+    expect(response.status).toBe(200);
   });
 
   it("maps backend ApiError status", async () => {

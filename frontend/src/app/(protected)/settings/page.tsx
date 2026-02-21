@@ -17,6 +17,7 @@ type CurrentUserProfile = {
   name: string | null;
   bio: string | null;
   avatar_key: string | null;
+  is_private: boolean;
 };
 
 type SettingsPageSearchParams = {
@@ -189,6 +190,24 @@ export default async function SettingsPage({
           multiline
           rows={3}
         />
+
+        <label className="ui-surface-input ui-focus-ring flex items-start gap-3 rounded-2xl border ui-border px-3 py-3 text-sm focus-within:outline-none">
+          <input
+            type="checkbox"
+            name="is_private"
+            value="true"
+            defaultChecked={Boolean(profile.is_private)}
+            className="mt-0.5 h-4 w-4 rounded border ui-border"
+          />
+          <span className="min-w-0">
+            <span className="ui-text-strong block font-medium">
+              Compte privé
+            </span>
+            <span className="ui-text-muted block text-xs">
+              Seuls vos followers approuvés peuvent voir vos publications.
+            </span>
+          </span>
+        </label>
 
         <div className="flex justify-end">
           <button
