@@ -30,7 +30,7 @@ class SupportsRateLimitClient(Protocol):
 ACCESS_COOKIE_NAME = "access_token"
 REFRESH_COOKIE_NAME = "refresh_token"
 SUPPORTED_TOKEN_TYPES = frozenset({"access", "refresh"})
-REFRESH_ENDPOINT_PATH = "/api/v1/auth/refresh"
+AUTH_PATH_PREFIX = "/api/v1/auth"
 FORWARDED_CLIENT_KEY_HEADER = "x-rate-limit-client"
 FORWARDED_CLIENT_SIGNATURE_HEADER = "x-rate-limit-signature"
 FORWARDED_CLIENT_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
@@ -122,16 +122,6 @@ def _extract_authenticated_client_identifier(request: Request) -> str | None:
     return None
 
 
-def _refresh_token_fingerprint(request: Request) -> str | None:
-    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
-    if not refresh_token:
-        return None
-
-    digest = hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
-    # Keep Redis keys compact while still preserving enough entropy.
-    return f"refresh:{digest[:24]}"
-
-
 def _extract_forwarded_client_identifier(request: Request) -> str | None:
     proxy_secret = settings.rate_limit_proxy_secret.strip()
     if not proxy_secret:
@@ -179,15 +169,6 @@ def _is_trusted_proxy(remote_ip: IPv4Address | IPv6Address | None) -> bool:
 
 def default_client_identifier(request: Request) -> str:
     """Resolve a stable client identifier for rate limiting."""
-    if request.url.path == REFRESH_ENDPOINT_PATH:
-        refresh_fingerprint = _refresh_token_fingerprint(request)
-        if refresh_fingerprint is not None:
-            return refresh_fingerprint
-
-    authenticated_identifier = _extract_authenticated_client_identifier(request)
-    if authenticated_identifier is not None:
-        return authenticated_identifier
-
     remote_host, remote_ip = _remote_ip(request)
 
     # Signed forwarded identifiers are verified with HMAC and do not rely
@@ -195,6 +176,10 @@ def default_client_identifier(request: Request) -> str:
     forwarded_identifier = _extract_forwarded_client_identifier(request)
     if forwarded_identifier is not None:
         return forwarded_identifier
+
+    authenticated_identifier = _extract_authenticated_client_identifier(request)
+    if authenticated_identifier is not None:
+        return authenticated_identifier
 
     # Only trust forwarded source IP headers from explicitly configured
     # proxy/load balancer networks.
@@ -297,10 +282,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         limiter = override if override is not None else self._get_limiter()
 
         if limiter is None:
+            if _is_auth_path(path):
+                return JSONResponse(
+                    {"detail": "Service unavailable"},
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
             return await call_next(request)
 
         client_key = self.client_identifier(request) or "anonymous"
-        if not await limiter.allow(client_key):
+        try:
+            is_allowed = await limiter.allow(client_key)
+        except Exception:  # pragma: no cover - defensive fallback for Redis outages
+            if _is_auth_path(path):
+                return JSONResponse(
+                    {"detail": "Service unavailable"},
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            return await call_next(request)
+
+        if not is_allowed:
             return JSONResponse(
                 {"detail": "Too Many Requests"},
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -315,3 +315,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             except Exception:  # pragma: no cover - defensive fallback
                 self._limiter = None
         return self._limiter
+
+
+def _is_auth_path(path: str) -> bool:
+    return path == AUTH_PATH_PREFIX or path.startswith(f"{AUTH_PATH_PREFIX}/")

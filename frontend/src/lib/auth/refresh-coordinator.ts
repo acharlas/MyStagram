@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 
+import {
+  buildRateLimitClientSignature,
+  RATE_LIMIT_CLIENT_HEADER,
+  RATE_LIMIT_SIGNATURE_HEADER,
+} from "@/lib/auth/rate-limit-client";
+
 export type RefreshTokenResponse = {
   access_token: string;
   refresh_token: string;
@@ -38,6 +44,21 @@ function buildApiUrl(path: string, apiBaseUrl: string): string {
 
 function hashRefreshToken(refreshToken: string): string {
   return createHash("sha256").update(refreshToken).digest("hex");
+}
+
+function buildRefreshRateLimitHeaders(
+  refreshToken: string,
+): Record<string, string> {
+  const clientKey = hashRefreshToken(refreshToken).slice(0, 32);
+  const signature = buildRateLimitClientSignature(clientKey);
+  if (!signature) {
+    return {};
+  }
+
+  return {
+    [RATE_LIMIT_CLIENT_HEADER]: clientKey,
+    [RATE_LIMIT_SIGNATURE_HEADER]: signature,
+  };
 }
 
 function pruneExpiredRecentRefreshResults(nowMs: number = Date.now()): void {
@@ -93,12 +114,14 @@ async function requestRefreshTokens(
   fetchImpl: Fetcher,
   apiBaseUrl: string,
 ): Promise<RefreshTokenResponse> {
+  const rateLimitHeaders = buildRefreshRateLimitHeaders(refreshToken);
   const response = await fetchImpl(
     buildApiUrl("/api/v1/auth/refresh", apiBaseUrl),
     {
       method: "POST",
       headers: {
         Cookie: `refresh_token=${refreshToken}`,
+        ...rateLimitHeaders,
       },
       cache: "no-store",
     },

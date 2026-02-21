@@ -642,9 +642,9 @@ describe("JWT and session callbacks", () => {
       "http://backend:8000/api/v1/auth/refresh",
       expect.objectContaining({
         method: "POST",
-        headers: {
+        headers: expect.objectContaining({
           Cookie: "refresh_token=refresh-token-old",
-        },
+        }),
       }),
     );
     expect(jwt).toMatchObject({

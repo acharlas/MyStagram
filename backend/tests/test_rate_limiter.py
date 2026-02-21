@@ -8,13 +8,13 @@ from collections.abc import Generator
 
 import pytest
 from fastapi import FastAPI
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 
 from core import create_access_token, create_refresh_token
 from core.config import settings
 from services import RateLimiter, set_rate_limiter
-from services.rate_limiter import default_client_identifier
+from services.rate_limiter import RateLimitMiddleware, default_client_identifier
 
 
 class InMemoryRedis:
@@ -28,6 +28,11 @@ class InMemoryRedis:
 
     async def expire(self, key: str, ttl: int) -> None:  # pragma: no cover - noop
         return None
+
+
+class FailingLimiter:
+    async def allow(self, key: str) -> bool:
+        raise RuntimeError("redis unavailable")
 
 
 @pytest.fixture(autouse=True)
@@ -86,13 +91,12 @@ def test_default_client_identifier_uses_refresh_cookie_when_access_missing() -> 
     assert default_client_identifier(request) == "user:user-refresh"
 
 
-def test_default_client_identifier_uses_refresh_token_fingerprint_for_refresh_path() -> None:
+def test_default_client_identifier_uses_authenticated_identifier_for_refresh_path() -> None:
     refresh_token = create_refresh_token("user-refresh")
     request = _build_request(cookie_header=f"refresh_token={refresh_token}")
     request.scope["path"] = "/api/v1/auth/refresh"
-    expected_digest = hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()[:24]
 
-    assert default_client_identifier(request) == f"refresh:{expected_digest}"
+    assert default_client_identifier(request) == "user:user-refresh"
 
 
 def test_default_client_identifier_uses_bearer_token_when_no_cookie() -> None:
@@ -192,6 +196,96 @@ async def test_refresh_endpoint_is_rate_limited(
             del app.state.rate_limiter_override
 
     set_rate_limiter(None)
+
+
+@pytest.mark.asyncio
+async def test_refresh_endpoint_rate_limit_ignores_rotating_invalid_refresh_tokens(
+    async_client: AsyncClient, app: FastAPI
+) -> None:
+    limiter = RateLimiter(InMemoryRedis(), limit=1, window_seconds=60)
+    app.state.rate_limiter_override = limiter
+
+    try:
+        first = await async_client.post(
+            "/api/v1/auth/refresh",
+            headers={"cookie": "refresh_token=invalid-token-1"},
+        )
+        second = await async_client.post(
+            "/api/v1/auth/refresh",
+            headers={"cookie": "refresh_token=invalid-token-2"},
+        )
+        assert first.status_code == 401
+        assert second.status_code == 429
+    finally:
+        if hasattr(app.state, "rate_limiter_override"):
+            del app.state.rate_limiter_override
+
+    set_rate_limiter(None)
+
+
+@pytest.mark.asyncio
+async def test_auth_paths_fail_closed_when_limiter_unavailable() -> None:
+    api = FastAPI()
+    api.add_middleware(
+        RateLimitMiddleware,
+        limiter_factory=lambda: (_ for _ in ()).throw(RuntimeError("redis down")),
+    )
+
+    @api.post("/api/v1/auth/login")
+    async def login_route() -> dict[str, str]:
+        return {"detail": "ok"}
+
+    @api.get("/api/v1/health")
+    async def health_route() -> dict[str, str]:
+        return {"status": "ok"}
+
+    transport = ASGITransport(app=api)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        auth_response = await client.post("/api/v1/auth/login")
+        health_response = await client.get("/api/v1/health")
+
+    assert auth_response.status_code == 503
+    assert health_response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_auth_paths_fail_closed_when_limiter_errors_during_allow() -> None:
+    api = FastAPI()
+    api.add_middleware(
+        RateLimitMiddleware,
+        limiter_factory=lambda: FailingLimiter(),
+    )
+
+    @api.post("/api/v1/auth/login")
+    async def login_route() -> dict[str, str]:
+        return {"detail": "ok"}
+
+    transport = ASGITransport(app=api)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        auth_response = await client.post("/api/v1/auth/login")
+
+    assert auth_response.status_code == 503
+    assert auth_response.json()["detail"] == "Service unavailable"
+
+
+@pytest.mark.asyncio
+async def test_non_auth_paths_fail_open_when_limiter_errors_during_allow() -> None:
+    api = FastAPI()
+    api.add_middleware(
+        RateLimitMiddleware,
+        limiter_factory=lambda: FailingLimiter(),
+    )
+
+    @api.get("/api/v1/health")
+    async def health_route() -> dict[str, str]:
+        return {"status": "ok"}
+
+    transport = ASGITransport(app=api)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        health_response = await client.get("/api/v1/health")
+
+    assert health_response.status_code == 200
+    assert health_response.json()["status"] == "ok"
 
 
 @pytest.mark.asyncio
