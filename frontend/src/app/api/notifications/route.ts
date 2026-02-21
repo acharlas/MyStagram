@@ -30,6 +30,10 @@ type DismissNotificationPayload = {
   dismissed_at: string;
 };
 
+type DismissNotificationsBulkPayload = {
+  processed_count: number;
+};
+
 const MAX_NOTIFICATIONS = 16;
 const FOLLOW_REQUESTS_LIMIT = 8;
 
@@ -133,6 +137,93 @@ export async function POST(request: Request) {
     console.error("Notification dismiss proxy failed", error);
     return NextResponse.json(
       { detail: "Unexpected error while dismissing notification." },
+      { status: 500 },
+    );
+  }
+}
+
+export async function PATCH(request: Request) {
+  const session = await getSessionServer();
+  const accessToken = session?.accessToken as string | undefined;
+
+  if (!accessToken) {
+    return NextResponse.json({ detail: "Not authenticated" }, { status: 401 });
+  }
+
+  let notificationIdsRaw: unknown;
+  try {
+    const payload = (await request.json()) as {
+      notification_ids?: unknown;
+    };
+    notificationIdsRaw = payload.notification_ids;
+  } catch {
+    return NextResponse.json(
+      { detail: "Invalid request payload." },
+      { status: 400 },
+    );
+  }
+
+  if (!Array.isArray(notificationIdsRaw)) {
+    return NextResponse.json(
+      { detail: "notification_ids must be an array." },
+      { status: 422 },
+    );
+  }
+  if (notificationIdsRaw.length === 0) {
+    return NextResponse.json(
+      { detail: "notification_ids must not be empty." },
+      { status: 422 },
+    );
+  }
+
+  const normalizedIds: string[] = [];
+  const seenIds = new Set<string>();
+  for (const rawId of notificationIdsRaw) {
+    if (typeof rawId !== "string") {
+      return NextResponse.json(
+        { detail: "notification_ids must contain only strings." },
+        { status: 422 },
+      );
+    }
+    const trimmedId = rawId.trim();
+    if (!trimmedId) {
+      return NextResponse.json(
+        { detail: "notification_ids must not contain empty values." },
+        { status: 422 },
+      );
+    }
+    if (seenIds.has(trimmedId)) {
+      continue;
+    }
+    seenIds.add(trimmedId);
+    normalizedIds.push(trimmedId);
+  }
+
+  const authCookie = buildAuthCookie(accessToken);
+  try {
+    const payload = await apiServerFetch<DismissNotificationsBulkPayload>(
+      "/api/v1/notifications/dismissed/bulk",
+      {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          Cookie: authCookie,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ notification_ids: normalizedIds }),
+      },
+    );
+    return NextResponse.json(payload, { status: 200 });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      return NextResponse.json(
+        { detail: error.message ?? "Unable to dismiss notifications." },
+        { status: error.status },
+      );
+    }
+    console.error("Notification bulk dismiss proxy failed", error);
+    return NextResponse.json(
+      { detail: "Unexpected error while dismissing notifications." },
       { status: 500 },
     );
   }
