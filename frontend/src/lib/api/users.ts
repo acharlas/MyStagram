@@ -42,6 +42,9 @@ export type FollowMutationResult = {
   detail: string | null;
 };
 
+const SEARCH_MIN_LIMIT = 1;
+const SEARCH_MAX_LIMIT = 50;
+
 function buildHeaders(accessToken?: string): HeadersInit | undefined {
   if (!accessToken) {
     return undefined;
@@ -53,6 +56,13 @@ function buildHeaders(accessToken?: string): HeadersInit | undefined {
 
 function buildProfilePath(username: string) {
   return `/api/v1/users/${encodeURIComponent(username)}`;
+}
+
+function normalizeSearchLimit(limit: number): number {
+  if (!Number.isInteger(limit)) {
+    return 10;
+  }
+  return Math.min(Math.max(limit, SEARCH_MIN_LIMIT), SEARCH_MAX_LIMIT);
 }
 
 function buildConnectionPath(
@@ -328,9 +338,10 @@ export async function searchUsers(
     return [];
   }
 
+  const normalizedLimit = normalizeSearchLimit(limit);
   const params = new URLSearchParams();
   params.set("q", trimmed);
-  params.set("limit", String(limit));
+  params.set("limit", String(normalizedLimit));
   const url = `/api/users/search?${params.toString()}`;
 
   try {
@@ -351,4 +362,30 @@ export async function searchUsers(
     }
     throw error;
   }
+}
+
+export async function searchUsersServer(
+  query: string,
+  {
+    limit = 10,
+  }: {
+    limit?: number;
+  } = {},
+  accessToken?: string,
+): Promise<UserProfilePublic[]> {
+  if (!accessToken) {
+    return [];
+  }
+
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const normalizedLimit = normalizeSearchLimit(limit);
+  const backendPath = `/api/v1/users/search?q=${encodeURIComponent(trimmed)}&limit=${normalizedLimit}`;
+  return apiServerFetch<UserProfilePublic[]>(backendPath, {
+    cache: "no-store",
+    headers: buildHeaders(accessToken),
+  });
 }
