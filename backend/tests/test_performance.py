@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from core.security import hash_password
-from models import Comment, DismissedNotification, Follow, Like, Post, User
+from models import Comment, DismissedNotification, Follow, FollowRequest, Like, Post, User
 
 
 def _eq(column: Any, value: Any) -> ColumnElement[bool]:
@@ -187,9 +187,9 @@ async def test_notification_stream_query_is_fast(
             )
         )
         db_session.add(
-            Follow(
-                follower_id=actor.id,
-                followee_id=owner.id,
+            FollowRequest(
+                requester_id=actor.id,
+                target_id=owner.id,
                 created_at=event_time,
                 updated_at=event_time,
             )

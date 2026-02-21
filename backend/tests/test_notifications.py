@@ -11,7 +11,7 @@ from sqlalchemy import delete, event, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.sql import ColumnElement
 
-from models import Comment, DismissedNotification, Follow, Like, Post, User
+from models import Comment, DismissedNotification, FollowRequest, Like, Post, User
 from services.notifications import dismissals as notification_dismissals
 
 
@@ -568,7 +568,7 @@ async def test_notification_stream_requires_auth(async_client: AsyncClient) -> N
 
 
 @pytest.mark.asyncio
-async def test_notification_stream_includes_comment_like_and_follow_entries(
+async def test_notification_stream_includes_comment_like_and_follow_request_entries(
     async_client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
@@ -618,15 +618,15 @@ async def test_notification_stream_includes_comment_like_and_follow_entries(
         created_at=base_time + timedelta(minutes=2),
         updated_at=base_time + timedelta(minutes=2),
     )
-    follow = Follow(
-        follower_id=follower.id,
-        followee_id=owner.id,
+    follow_request = FollowRequest(
+        requester_id=follower.id,
+        target_id=owner.id,
         created_at=base_time + timedelta(minutes=3),
         updated_at=base_time + timedelta(minutes=3),
     )
     db_session.add(comment)
     db_session.add(like)
-    db_session.add(follow)
+    db_session.add(follow_request)
     await db_session.commit()
     await db_session.refresh(comment)
     if comment.id is None:  # pragma: no cover - defensive
@@ -662,7 +662,47 @@ async def test_notification_stream_includes_comment_like_and_follow_entries(
 
 
 @pytest.mark.asyncio
-async def test_follow_notification_can_be_dismissed(
+async def test_follow_request_sent_via_follow_endpoint_appears_in_notifications(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner_payload = make_user_payload("fr_ep_owner")
+    requester_payload = make_user_payload("fr_ep_actor")
+
+    await register_and_login(async_client, owner_payload)
+    await async_client.post("/api/v1/auth/logout")
+    await register_and_login(async_client, requester_payload)
+    await async_client.post("/api/v1/auth/logout")
+
+    owner = await get_user_by_username(db_session, owner_payload["username"])
+    owner.is_private = True
+    db_session.add(owner)
+    await db_session.commit()
+
+    await login(async_client, requester_payload)
+    follow_response = await async_client.post(
+        f"/api/v1/users/{owner_payload['username']}/follow"
+    )
+    assert follow_response.status_code == 200
+    assert follow_response.json()["state"] == "requested"
+
+    await async_client.post("/api/v1/auth/logout")
+    await login(async_client, owner_payload)
+
+    stream = await async_client.get("/api/v1/notifications/stream")
+    assert stream.status_code == 200
+    payload = stream.json()
+    requester = await get_user_by_username(db_session, requester_payload["username"])
+    expected_follow_id = f"follow-{requester.id}"
+    assert any(
+        item["id"] == expected_follow_id
+        and item["username"] == requester_payload["username"]
+        for item in payload["follow_requests"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_follow_request_notification_can_be_dismissed(
     async_client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
@@ -679,9 +719,9 @@ async def test_follow_notification_can_be_dismissed(
 
     follow_time = datetime(2026, 2, 14, 14, 0, 0, tzinfo=timezone.utc)
     db_session.add(
-        Follow(
-            follower_id=follower.id,
-            followee_id=owner.id,
+        FollowRequest(
+            requester_id=follower.id,
+            target_id=owner.id,
             created_at=follow_time,
             updated_at=follow_time,
         )
@@ -711,7 +751,7 @@ async def test_follow_notification_can_be_dismissed(
 
 
 @pytest.mark.asyncio
-async def test_follow_notification_reappears_after_new_follow_event(
+async def test_follow_request_notification_reappears_after_new_request_event(
     async_client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
@@ -727,13 +767,13 @@ async def test_follow_notification_reappears_after_new_follow_event(
     follower = await get_user_by_username(db_session, follower_payload["username"])
 
     now_utc = datetime.now(tz=timezone.utc)
-    first_follow_time = now_utc - timedelta(minutes=10)
+    first_follow_request_time = now_utc - timedelta(minutes=10)
     db_session.add(
-        Follow(
-            follower_id=follower.id,
-            followee_id=owner.id,
-            created_at=first_follow_time,
-            updated_at=first_follow_time,
+        FollowRequest(
+            requester_id=follower.id,
+            target_id=owner.id,
+            created_at=first_follow_request_time,
+            updated_at=first_follow_request_time,
         )
     )
     await db_session.commit()
@@ -754,18 +794,18 @@ async def test_follow_notification_reappears_after_new_follow_event(
     )
 
     await db_session.execute(
-        delete(Follow).where(
-            _eq(Follow.follower_id, follower.id),
-            _eq(Follow.followee_id, owner.id),
+        delete(FollowRequest).where(
+            _eq(FollowRequest.requester_id, follower.id),
+            _eq(FollowRequest.target_id, owner.id),
         )
     )
-    second_follow_time = now_utc + timedelta(minutes=1)
+    second_follow_request_time = now_utc + timedelta(minutes=1)
     db_session.add(
-        Follow(
-            follower_id=follower.id,
-            followee_id=owner.id,
-            created_at=second_follow_time,
-            updated_at=second_follow_time,
+        FollowRequest(
+            requester_id=follower.id,
+            target_id=owner.id,
+            created_at=second_follow_request_time,
+            updated_at=second_follow_request_time,
         )
     )
     await db_session.commit()

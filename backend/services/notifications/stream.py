@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql import ColumnElement
 
-from models import Comment, DismissedNotification, Follow, Like, Post, User
+from models import Comment, DismissedNotification, FollowRequest, Like, Post, User
 
 from .common import desc, eq
 from .ids import (
@@ -323,12 +323,14 @@ async def _load_follow_stream_items(
     *,
     limit: int,
 ) -> list[FollowStreamItem]:
-    follow_follower_id_column = cast(ColumnElement[str], Follow.follower_id)
-    follow_created_at_column = cast(ColumnElement[datetime], Follow.created_at)
-    follow_username_column = cast(ColumnElement[str | None], User.username)
-    follow_name_column = cast(ColumnElement[str | None], User.name)
-    follow_notification_id_column = follow_notification_id_expression(
-        follow_follower_id_column
+    follow_requester_id_column = cast(ColumnElement[str], FollowRequest.requester_id)
+    follow_request_created_at_column = cast(
+        ColumnElement[datetime], FollowRequest.created_at
+    )
+    follow_request_username_column = cast(ColumnElement[str | None], User.username)
+    follow_request_name_column = cast(ColumnElement[str | None], User.name)
+    follow_request_notification_id_column = follow_notification_id_expression(
+        follow_requester_id_column
     )
     dismissed_follow = aliased(DismissedNotification)
     dismissed_follow_notification_id_column = cast(
@@ -340,43 +342,43 @@ async def _load_follow_stream_items(
 
     result = await session.execute(
         select(
-            follow_follower_id_column,
-            follow_created_at_column,
-            follow_username_column,
-            follow_name_column,
+            follow_requester_id_column,
+            follow_request_created_at_column,
+            follow_request_username_column,
+            follow_request_name_column,
         )
-        .join(User, eq(User.id, Follow.follower_id))
+        .join(User, eq(User.id, FollowRequest.requester_id))
         .outerjoin(
             dismissed_follow,
             and_(
                 eq(dismissed_follow.user_id, user_id),
                 eq(
                     dismissed_follow_notification_id_column,
-                    follow_notification_id_column,
+                    follow_request_notification_id_column,
                 ),
             ),
         )
-        .where(eq(Follow.followee_id, user_id))
+        .where(eq(FollowRequest.target_id, user_id))
         .where(
             or_(
                 dismissed_follow_at_column.is_(None),
-                dismissed_follow_at_column < follow_created_at_column,
+                dismissed_follow_at_column < follow_request_created_at_column,
             )
         )
         .order_by(
-            desc(cast(Any, Follow.created_at)),
-            desc(cast(Any, Follow.follower_id)),
+            desc(cast(Any, FollowRequest.created_at)),
+            desc(cast(Any, FollowRequest.requester_id)),
         )
         .limit(limit)
     )
 
     follow_items: list[FollowStreamItem] = []
-    for follower_id, created_at, username, name in result.all():
+    for requester_id, created_at, username, name in result.all():
         if not username:
             continue
         follow_items.append(
             FollowStreamItem(
-                id=build_follow_notification_id(follower_id),
+                id=build_follow_notification_id(requester_id),
                 username=username,
                 name=name or username,
                 href=f"/users/{quote(username)}",
