@@ -14,8 +14,8 @@ import {
   BellIcon,
   BookmarkIcon,
   BrandMarkIcon,
-  CompassIcon,
   CloseIcon,
+  CompassIcon,
   CreateIcon,
   HomeIcon,
   LogOutIcon,
@@ -91,8 +91,10 @@ export function NavBar({ username, avatarKey }: NavBarProps) {
     totalCount: inboxTotalCount,
     isLoading: isInboxLoading,
     isRefreshing: isInboxRefreshing,
+    isMarkingAllRead: isInboxMarkingAllRead,
     error: inboxError,
     dismissNotification,
+    markAllNotificationsRead,
     prefetchInbox,
   } = useInboxState({ isOpen: isDesktopInboxOpen || isMobileInboxOpen });
 
@@ -250,6 +252,8 @@ export function NavBar({ username, avatarKey }: NavBarProps) {
                 isRefreshing={isInboxRefreshing}
                 error={inboxError}
                 onNotificationRead={dismissNotification}
+                onMarkAllRead={markAllNotificationsRead}
+                isMarkingAllRead={isInboxMarkingAllRead}
                 onNavigate={() => setIsDesktopInboxOpen(false)}
                 className="space-y-2"
               />
@@ -502,6 +506,8 @@ export function NavBar({ username, avatarKey }: NavBarProps) {
           isRefreshing={isInboxRefreshing}
           error={inboxError}
           onNotificationRead={dismissNotification}
+          onMarkAllRead={markAllNotificationsRead}
+          isMarkingAllRead={isInboxMarkingAllRead}
           onNavigate={() => setIsMobileInboxOpen(false)}
           className="space-y-2"
         />

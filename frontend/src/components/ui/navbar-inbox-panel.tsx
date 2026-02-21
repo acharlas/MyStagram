@@ -19,6 +19,8 @@ type NavbarInboxPanelProps = {
   error: string | null;
   className?: string;
   onNotificationRead: (notificationId: string) => void;
+  onMarkAllRead: () => void;
+  isMarkingAllRead: boolean;
   onNavigate: () => void;
 };
 
@@ -59,6 +61,8 @@ export function NavbarInboxPanel({
   error,
   className,
   onNotificationRead,
+  onMarkAllRead,
+  isMarkingAllRead,
   onNavigate,
 }: NavbarInboxPanelProps) {
   if (error) {
@@ -81,6 +85,7 @@ export function NavbarInboxPanel({
 
   const hasNotifications = notifications.length > 0;
   const hasFollowRequests = followRequests.length > 0;
+  const hasItems = hasNotifications || hasFollowRequests;
 
   if (!hasNotifications && !hasFollowRequests) {
     return (
@@ -98,6 +103,14 @@ export function NavbarInboxPanel({
         <div className="ui-text-muted flex items-center justify-between px-1 text-xs font-semibold tracking-[0.08em]">
           <span>Notifications</span>
           <span className="inline-flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onMarkAllRead}
+              disabled={!hasItems || isMarkingAllRead}
+              className="ui-focus-ring rounded-md px-1.5 py-0.5 text-[10px] tracking-normal transition hover:bg-[color:var(--ui-surface-muted)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isMarkingAllRead ? "MAJ..." : "Tout lu"}
+            </button>
             {isRefreshing ? (
               <span className="ui-warning-text text-[10px] uppercase">
                 MAJ...

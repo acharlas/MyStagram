@@ -43,6 +43,31 @@ export function shouldPrefetchInbox(
   return !hasLoaded && !hasActiveRequest;
 }
 
+export function collectDismissibleInboxIds(
+  notifications: InboxEvent[],
+  followRequests: FollowRequest[],
+): string[] {
+  const uniqueIds: string[] = [];
+  const seenIds = new Set<string>();
+  for (const notification of notifications) {
+    const trimmedId = notification.id.trim();
+    if (!trimmedId || seenIds.has(trimmedId)) {
+      continue;
+    }
+    seenIds.add(trimmedId);
+    uniqueIds.push(trimmedId);
+  }
+  for (const followRequest of followRequests) {
+    const trimmedId = followRequest.id.trim();
+    if (!trimmedId || seenIds.has(trimmedId)) {
+      continue;
+    }
+    seenIds.add(trimmedId);
+    uniqueIds.push(trimmedId);
+  }
+  return uniqueIds;
+}
+
 async function parseErrorDetail(response: Response): Promise<string> {
   try {
     const payload = (await response.json()) as {
@@ -62,6 +87,7 @@ export function useInboxState({ isOpen }: UseInboxStateArgs) {
   const [followRequests, setFollowRequests] = useState<FollowRequest[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const hasLoadedRef = useRef(false);
@@ -183,6 +209,67 @@ export function useInboxState({ isOpen }: UseInboxStateArgs) {
     });
   }, []);
 
+  const markAllNotificationsRead = useCallback(() => {
+    if (isMarkingAllRead) {
+      return;
+    }
+
+    const notificationIds = collectDismissibleInboxIds(
+      notifications,
+      followRequests,
+    );
+    if (notificationIds.length === 0) {
+      return;
+    }
+
+    const previousNotifications = notifications;
+    const previousFollowRequests = followRequests;
+
+    for (const notificationId of notificationIds) {
+      dismissedNotificationIdsRef.current.add(notificationId);
+    }
+    setNotifications([]);
+    setFollowRequests([]);
+    setError(null);
+    setIsMarkingAllRead(true);
+
+    void fetch("/api/notifications", {
+      method: "PATCH",
+      cache: "no-store",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ notification_ids: notificationIds }),
+    })
+      .then(async (response) => {
+        if (response.ok) {
+          return;
+        }
+        const detail = await parseErrorDetail(response);
+        throw new Error(detail);
+      })
+      .catch((persistError) => {
+        console.error(
+          "Failed to persist bulk dismissed notifications",
+          persistError,
+        );
+        for (const notificationId of notificationIds) {
+          dismissedNotificationIdsRef.current.delete(notificationId);
+        }
+        setNotifications(previousNotifications);
+        setFollowRequests(previousFollowRequests);
+        const detail =
+          persistError instanceof Error && persistError.message.length > 0
+            ? persistError.message
+            : DEFAULT_ERROR_MESSAGE;
+        setError(detail);
+      })
+      .finally(() => {
+        setIsMarkingAllRead(false);
+      });
+  }, [followRequests, isMarkingAllRead, notifications]);
+
   const prefetchInbox = useCallback(() => {
     if (
       !shouldPrefetchInbox(
@@ -201,8 +288,10 @@ export function useInboxState({ isOpen }: UseInboxStateArgs) {
     totalCount: notifications.length + followRequests.length,
     isLoading,
     isRefreshing,
+    isMarkingAllRead,
     error,
     dismissNotification,
+    markAllNotificationsRead,
     prefetchInbox,
   };
 }
