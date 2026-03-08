@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_db
+from db.query_helpers import _eq  # noqa: F401  (accessed as auth._eq in tests)
 from core import (
     create_access_token,
     create_refresh_token,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import Any, NamedTuple, cast
 from urllib.parse import quote
@@ -12,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql import ColumnElement
 
-from db.session import AsyncSessionMaker
 from models import Comment, DismissedNotification, FollowRequest, Like, Post, User
 from services.account_blocks import build_not_blocked_either_direction_filter
 
@@ -410,11 +408,12 @@ async def load_notification_stream(
     limit: int,
     follow_limit: int,
 ) -> NotificationStreamResponse:
-    async with AsyncSessionMaker() as session2:
-        visible_notifications, follow_items = await asyncio.gather(
-            _load_notification_stream_items(session, user_id, limit=limit),
-            _load_follow_stream_items(session2, user_id, limit=follow_limit),
-        )
+    visible_notifications = await _load_notification_stream_items(
+        session, user_id, limit=limit
+    )
+    follow_items = await _load_follow_stream_items(
+        session, user_id, limit=follow_limit
+    )
     return NotificationStreamResponse(
         notifications=visible_notifications,
         follow_requests=follow_items,
