@@ -12,14 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from core import decode_token
+from db.query_helpers import _eq
 from models import RefreshToken
 
 MAX_ACTIVE_REFRESH_TOKENS = 5
 DecodeTokenFn = Callable[[str], dict[str, Any]]
-
-
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
 
 
 def hash_refresh_token(token: str) -> str:

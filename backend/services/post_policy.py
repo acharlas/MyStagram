@@ -9,13 +9,10 @@ from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
+from db.query_helpers import _eq
 from models import Follow, Post, User
 from services.account_privacy import can_view_account_content
 from services.account_blocks import build_not_blocked_either_direction_filter
-
-
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
 
 
 def build_author_view_filter(

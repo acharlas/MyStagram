@@ -11,11 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from db.errors import is_unique_violation
+from db.query_helpers import _eq
 from models import Follow, FollowRequest, UserBlock
-
-
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
 
 
 def build_not_blocked_either_direction_filter(
