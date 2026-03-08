@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import cast
 
 from fastapi import HTTPException, status
 from sqlalchemy import and_, exists, or_, select

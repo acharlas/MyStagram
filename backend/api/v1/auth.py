@@ -12,7 +12,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_db
-from db.query_helpers import _eq
 from core import (
     create_access_token,
     create_refresh_token,
@@ -35,7 +34,6 @@ from services.auth import (
     normalize_email,
     registration_conflict_exists,
     resolve_login_user,
-    resolve_user_from_candidates,
     revoke_refresh_token,
     set_token_cookies,
     store_refresh_token,

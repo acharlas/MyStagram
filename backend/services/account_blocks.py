@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import  cast
 
 from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.exc import IntegrityError
