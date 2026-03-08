@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export type InboxEvent = {
   id: string;
   username: string | null;
-  message: string;
   href: string;
   kind: "like" | "comment";
   occurred_at: string | null;

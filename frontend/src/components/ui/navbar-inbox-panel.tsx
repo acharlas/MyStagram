@@ -33,6 +33,11 @@ type NavbarInboxPanelProps = {
   onNavigate: () => void;
 };
 
+function getNotificationLabel(kind: "like" | "comment"): string {
+  if (kind === "comment") return "a commenté votre publication";
+  return "a aimé votre publication";
+}
+
 function formatRelativeTime(rawDate: string | null): string {
   if (!rawDate) {
     return "Récemment";
@@ -164,11 +169,11 @@ export function NavbarInboxPanel({
                         <span className="font-semibold">
                           @{notification.username}
                         </span>{" "}
-                        {notification.message}
+                        {getNotificationLabel(notification.kind)}
                       </span>
                     ) : (
                       <span className="ui-text-strong block text-sm">
-                        {notification.message}
+                        {getNotificationLabel(notification.kind)}
                       </span>
                     )}
                     <span className="ui-text-muted block text-xs">
