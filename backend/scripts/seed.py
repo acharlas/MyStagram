@@ -45,10 +45,7 @@ from services.auth import (  # noqa: E402
     sync_default_avatar_asset,
 )
 from services.storage import ensure_bucket, get_minio_client  # noqa: E402
-
-
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
+from db.query_helpers import _eq  # noqa: E402
 
 
 @dataclass(frozen=True)

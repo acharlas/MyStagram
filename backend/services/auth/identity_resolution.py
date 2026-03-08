@@ -7,14 +7,10 @@ from typing import Any, Callable, cast
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import ColumnElement
 
 from core import verify_password
+from db.query_helpers import _eq
 from models import User
-
-
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
 
 
 def _asc(column: Any) -> Any:

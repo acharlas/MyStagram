@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import ColumnElement
 
+from db.query_helpers import _eq
 from models import Follow, FollowRequest, User
 from services.account_blocks import are_users_blocked
-
-
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
 
 
 async def is_following(

@@ -39,7 +39,6 @@ class NotificationStreamItem(BaseModel):
     id: str
     kind: Literal["comment", "like"]
     username: str | None
-    message: str
     href: str
     occurred_at: datetime | None
 

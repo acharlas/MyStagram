@@ -44,6 +44,28 @@ def ensure_bucket(client: Minio | None = None) -> None:
             raise
 
 
+def upload_image_bytes(
+    client: Minio,
+    object_key: str,
+    data: bytes,
+    content_type: str,
+) -> None:
+    """Upload raw bytes to the configured bucket using a pre-obtained client.
+
+    The caller must call ensure_bucket() before this so test patches on the
+    calling module's ensure_bucket remain effective.
+    """
+    from io import BytesIO
+
+    client.put_object(
+        settings.minio_bucket,
+        object_key,
+        data=BytesIO(data),
+        length=len(data),
+        content_type=content_type,
+    )
+
+
 def delete_object(object_key: str, client: Minio | None = None) -> None:
     """Delete an object from the configured bucket when it exists."""
     client = client or get_minio_client()

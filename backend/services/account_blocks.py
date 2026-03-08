@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import cast
 
 from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -11,11 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from db.errors import is_unique_violation
+from db.query_helpers import _eq
 from models import Follow, FollowRequest, UserBlock
-
-
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
 
 
 def build_not_blocked_either_direction_filter(

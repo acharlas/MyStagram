@@ -290,7 +290,6 @@ def _build_notification_stream_items(
                     id=build_comment_notification_id(post_id, comment_id),
                     kind="comment",
                     username=username,
-                    message="a commente votre publication",
                     href=f"/posts/{post_id}",
                     occurred_at=occurred_at,
                 )
@@ -304,7 +303,6 @@ def _build_notification_stream_items(
                 id=build_like_notification_id(post_id, liker_user_id),
                 kind="like",
                 username=username,
-                message="a aime votre publication",
                 href=f"/posts/{post_id}",
                 occurred_at=occurred_at,
             )
@@ -411,14 +409,10 @@ async def load_notification_stream(
     follow_limit: int,
 ) -> NotificationStreamResponse:
     visible_notifications = await _load_notification_stream_items(
-        session,
-        user_id,
-        limit=limit,
+        session, user_id, limit=limit
     )
     follow_items = await _load_follow_stream_items(
-        session,
-        user_id,
-        limit=follow_limit,
+        session, user_id, limit=follow_limit
     )
     return NotificationStreamResponse(
         notifications=visible_notifications,

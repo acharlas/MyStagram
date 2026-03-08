@@ -1,22 +1,26 @@
 """Common FastAPI dependencies."""
 
 from collections.abc import AsyncGenerator
-from typing import Any, cast
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import ColumnElement
 
 from core import decode_token
+from db.query_helpers import _eq
 from db.session import get_session
 from models import User
 
 ACCESS_COOKIE_NAME = "access_token"
 
 
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
+def _require_user_id(user: User, *, detail: str) -> str:
+    if user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=detail,
+        )
+    return user.id
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

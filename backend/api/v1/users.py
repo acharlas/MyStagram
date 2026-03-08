@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from io import BytesIO
 from typing import Annotated, Any, Literal, NoReturn, cast
 from uuid import uuid4
 
@@ -15,8 +14,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
-from api.deps import get_current_user, get_db
+from api.deps import _require_user_id, get_current_user, get_db
 from core import settings
+from db.query_helpers import _desc, _eq, _ilike, _is_not_null
 from db.errors import is_unique_violation
 from models import Follow, FollowRequest, Post, User, UserBlock
 from .pagination import MAX_PAGE_SIZE, set_next_offset_header
@@ -35,13 +35,13 @@ from services.account_blocks import (
     remove_user_block,
 )
 from services import (
-    JPEG_CONTENT_TYPE,
     UploadTooLargeError,
     delete_object,
     ensure_bucket,
     get_minio_client,
     process_image_bytes,
     read_upload_file,
+    upload_image_bytes,
 )
 
 router = APIRouter(tags=["users"])
@@ -50,37 +50,12 @@ MAX_PROFILE_BIO_LENGTH = 120
 logger = logging.getLogger(__name__)
 
 
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
-
-
-def _ilike(column: Any, pattern: str) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column.ilike(pattern))
-
-
-def _is_not_null(column: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column.isnot(None))
-
-
-def _desc(column: Any) -> Any:
-    return cast(Any, column).desc()
-
-
 async def _find_user_by_username(
     session: AsyncSession,
     username: str,
 ) -> User | None:
     result = await session.execute(select(User).where(_eq(User.username, username)))
     return result.scalar_one_or_none()
-
-
-def _require_user_id(user: User, *, detail: str) -> str:
-    if user.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=detail,
-        )
-    return user.id
 
 
 def _raise_user_not_found() -> NoReturn:
@@ -136,22 +111,6 @@ async def _can_view_target_content(
         session,
         viewer_id=viewer_id,
         account=target,
-    )
-
-
-def _upload_avatar_bytes(
-    object_key: str,
-    processed_bytes: bytes,
-    processed_content_type: str,
-) -> None:
-    client = get_minio_client()
-    ensure_bucket(client)
-    client.put_object(
-        settings.minio_bucket,
-        object_key,
-        data=BytesIO(processed_bytes),
-        length=len(processed_bytes),
-        content_type=processed_content_type or JPEG_CONTENT_TYPE,
     )
 
 
@@ -358,12 +317,9 @@ async def update_me(
             ) from exc
 
         object_key = f"avatars/{uuid4().hex}.jpg"
-        await asyncio.to_thread(
-            _upload_avatar_bytes,
-            object_key,
-            processed_bytes,
-            processed_content_type,
-        )
+        _client = get_minio_client()
+        ensure_bucket(_client)
+        await asyncio.to_thread(upload_image_bytes, _client, object_key, processed_bytes, processed_content_type)
 
         current_user.avatar_key = object_key
         uploaded_avatar_key = object_key

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from io import BytesIO
 from typing import Annotated, Any, cast
 from uuid import uuid4
 
@@ -15,8 +14,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
-from api.deps import get_current_user, get_db
+from api.deps import _require_user_id, get_current_user, get_db
 from core import settings
+from db.query_helpers import _desc, _eq
 from db.errors import is_unique_violation
 from models import Comment, Like, Post, SavedPost, User
 from .pagination import MAX_PAGE_SIZE, set_next_offset_header
@@ -28,6 +28,7 @@ from services import (
     get_minio_client,
     process_image_bytes,
     read_upload_file,
+    upload_image_bytes,
 )
 from services.account_blocks import build_not_blocked_either_direction_filter
 from services.post_policy import (
@@ -54,26 +55,6 @@ def _normalize_caption(caption: str | None) -> str | None:
     if normalized_caption == "":
         return None
     return normalized_caption
-
-
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
-
-
-def _desc(column: Any) -> Any:
-    return cast(Any, column).desc()
-
-
-def _upload_post_image(object_key: str, processed_bytes: bytes, content_type: str) -> None:
-    client = get_minio_client()
-    ensure_bucket(client)
-    client.put_object(
-        settings.minio_bucket,
-        object_key,
-        data=BytesIO(processed_bytes),
-        length=len(processed_bytes),
-        content_type=content_type,
-    )
 
 
 class CommentResponse(BaseModel):
@@ -176,22 +157,15 @@ async def create_post(
             detail=str(exc),
         ) from exc
 
-    if current_user.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    user_id = _require_user_id(current_user, detail="User record missing identifier")
 
-    object_key = f"posts/{current_user.id}/{uuid4().hex}.jpg"
-    await asyncio.to_thread(
-        _upload_post_image,
-        object_key,
-        processed_bytes,
-        content_type,
-    )
+    object_key = f"posts/{user_id}/{uuid4().hex}.jpg"
+    _client = get_minio_client()
+    ensure_bucket(_client)
+    await asyncio.to_thread(upload_image_bytes, _client, object_key, processed_bytes, content_type)
 
     post = Post(
-        author_id=current_user.id,
+        author_id=user_id,
         image_key=object_key,
         caption=normalized_caption,
     )
@@ -228,12 +202,7 @@ async def list_posts(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[PostResponse]:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     query = (
         select(Post)
@@ -296,12 +265,7 @@ async def list_saved_posts(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[PostResponse]:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     post_entity = cast(Any, Post)
     post_author_column = cast(ColumnElement[str], Post.author_id)
@@ -367,12 +331,7 @@ async def get_post(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> PostResponse:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     post_entity = cast(Any, Post)
     author_name_column = cast(ColumnElement[str | None], User.name)
@@ -425,12 +384,7 @@ async def update_post(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> PostResponse:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     post_entity = cast(Any, Post)
     result = await session.execute(
@@ -477,12 +431,7 @@ async def delete_post(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, str]:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     post_entity = cast(Any, Post)
     result = await session.execute(
@@ -532,12 +481,7 @@ async def get_post_comments(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[CommentResponse]:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     await require_post_view_access(
         session,
@@ -598,12 +542,7 @@ async def create_comment(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CommentResponse:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     await require_post_interaction_access(
         session,
@@ -642,12 +581,7 @@ async def delete_comment(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, str]:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     comment_entity = cast(Any, Comment)
     post_author_column = cast(ColumnElement[str], Post.author_id)
@@ -688,12 +622,7 @@ async def get_saved_post_status(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> SavedPostStatusResponse:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     await require_post_view_access(
         session,
@@ -720,12 +649,7 @@ async def save_post(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     await require_post_interaction_access(
         session,
@@ -760,12 +684,7 @@ async def unsave_post(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     saved_post_entity = cast(Any, SavedPost)
     user_id_column = cast(ColumnElement[str], SavedPost.user_id)
@@ -792,12 +711,7 @@ async def get_post_likes(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[PostLikerResponse]:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     await require_post_view_access(
         session,
@@ -860,12 +774,7 @@ async def like_post(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     await require_post_interaction_access(
         session,
@@ -901,12 +810,7 @@ async def unlike_post(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     await require_post_interaction_access(
         session,

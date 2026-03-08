@@ -4,28 +4,18 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from fastapi import HTTPException, Response, status
+from fastapi import Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
+from api.deps import _require_user_id
+from db.query_helpers import _desc, _eq, _ne
 from models import Follow, Like, Post, User
 from services.auth import DEFAULT_AVATAR_OBJECT_KEY
 from services.account_blocks import build_not_blocked_either_direction_filter
 from .pagination import set_next_offset_header
-
-
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
-
-
-def _desc(column: Any) -> Any:
-    return cast(Any, column).desc()
-
-
-def _ne(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column != value)
 
 
 class PostResponse(BaseModel):
@@ -142,12 +132,7 @@ async def build_home_feed(
     current_user: User,
 ) -> list[PostResponse]:
     """Return followee posts for the current user (shared by feed routes)."""
-    if current_user.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
-    viewer_id = current_user.id
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     post_entity = cast(Any, Post)
     author_name_column = cast(ColumnElement[str | None], User.name)
@@ -200,12 +185,7 @@ async def build_explore_feed(
     current_user: User,
 ) -> list[PostResponse]:
     """Return posts from non-followed accounts for discovery."""
-    if current_user.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
-    viewer_id = current_user.id
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     post_entity = cast(Any, Post)
     author_name_column = cast(ColumnElement[str | None], User.name)

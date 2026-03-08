@@ -6,7 +6,6 @@ type NotificationItem = {
   id: string;
   kind: "comment" | "like";
   username: string | null;
-  message: string;
   href: string;
   occurred_at: string | null;
 };

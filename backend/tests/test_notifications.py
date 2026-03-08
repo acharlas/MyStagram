@@ -1068,7 +1068,6 @@ async def test_stream_backfills_when_newest_notifications_are_dismissed(
     assert notification["id"] == f"comment-{post.id}-{older.id}"
     assert notification["kind"] == "comment"
     assert notification["username"] == commenter.username
-    assert notification["message"] == "a commente votre publication"
     assert notification["href"] == f"/posts/{post.id}"
     assert notification["occurred_at"].startswith("2026-02-14T12:01:00")
 
