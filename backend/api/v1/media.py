@@ -10,7 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
-from api.deps import get_current_user, get_db
+from api.deps import _require_user_id, get_current_user, get_db
+from db.query_helpers import _eq
 from models import Post, User
 from services import create_presigned_get_url
 from services.account_privacy import can_view_account_content
@@ -22,10 +23,6 @@ router = APIRouter(prefix="/media", tags=["media"])
 SIGNED_MEDIA_URL_TTL_SECONDS = 120
 MAX_OBJECT_KEY_LENGTH = 255
 MEDIA_NO_STORE_CACHE_CONTROL = "no-store"
-
-
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
 
 
 def _raise_media_not_found() -> NoReturn:
@@ -62,12 +59,7 @@ async def get_media_url(
     current_user: User = Depends(get_current_user),
 ) -> MediaURLResponse:
     response.headers["Cache-Control"] = MEDIA_NO_STORE_CACHE_CONTROL
-    viewer_id = current_user.id
-    if viewer_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User record missing identifier",
-        )
+    viewer_id = _require_user_id(current_user, detail="User record missing identifier")
 
     normalized_key = _normalize_object_key(key)
     if normalized_key == DEFAULT_AVATAR_OBJECT_KEY:

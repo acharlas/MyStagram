@@ -18,11 +18,13 @@ from .storage import (
     delete_object,
     ensure_bucket,
     get_minio_client,
+    upload_image_bytes,
 )
 
 __all__ = [
     "get_minio_client",
     "ensure_bucket",
+    "upload_image_bytes",
     "delete_object",
     "create_presigned_get_url",
     "process_image_bytes",

@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import Any, Callable, cast
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import ColumnElement
 
 from api.deps import get_db
+from db.query_helpers import _eq
 from core import (
     create_access_token,
     create_refresh_token,
@@ -49,29 +48,6 @@ REFRESH_COOKIE = SERVICE_REFRESH_COOKIE
 MAX_ACTIVE_REFRESH_TOKENS = SERVICE_MAX_ACTIVE_REFRESH_TOKENS
 MAX_PROFILE_BIO_LENGTH = 120
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._]{1,28}[A-Za-z0-9_]$")
-
-
-def _eq(column: Any, value: Any) -> ColumnElement[bool]:
-    return cast(ColumnElement[bool], column == value)
-
-
-def _normalize_email(value: str) -> str:
-    return normalize_email(value)
-
-
-def _resolve_user_from_candidates(
-    candidates: Sequence[User],
-    *,
-    password: str,
-    preferred_identifier: str | None = None,
-    identifier_getter: Callable[[User], str | None] | None = None,
-) -> User | None:
-    return resolve_user_from_candidates(
-        candidates,
-        password=password,
-        preferred_identifier=preferred_identifier,
-        identifier_getter=identifier_getter,
-    )
 
 
 class RegisterRequest(BaseModel):
@@ -159,20 +135,12 @@ async def _get_refresh_token(
     )
 
 
-def _set_token_cookies(response: Response, access_token: str, refresh_token: str) -> None:
-    set_token_cookies(response, access_token, refresh_token)
-
-
-def _clear_token_cookies(response: Response) -> None:
-    clear_token_cookies(response)
-
-
 @router.post("/register", status_code=status.HTTP_201_CREATED, response_model=UserResponse)
 async def register(
     payload: RegisterRequest,
     session: AsyncSession = Depends(get_db),
 ) -> UserResponse:
-    normalized_email = _normalize_email(str(payload.email))
+    normalized_email = normalize_email(str(payload.email))
     if await registration_conflict_exists(
         session,
         username=payload.username,
@@ -240,7 +208,7 @@ async def login(
     await _store_refresh_token(session, user_id, refresh_token)
     await session.commit()
 
-    _set_token_cookies(response, access_token, refresh_token)
+    set_token_cookies(response, access_token, refresh_token)
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
@@ -307,7 +275,7 @@ async def refresh_tokens(
             detail="Failed to refresh tokens",
         ) from exc
 
-    _set_token_cookies(response, access_token, new_refresh_token)
+    set_token_cookies(response, access_token, new_refresh_token)
     return TokenResponse(access_token=access_token, refresh_token=new_refresh_token)
 
 
@@ -322,5 +290,5 @@ async def logout(
         await revoke_refresh_token(session, refresh_token)
         await session.commit()
 
-    _clear_token_cookies(response)
+    clear_token_cookies(response)
     return {"detail": "Logged out"}
