@@ -21,11 +21,11 @@ export function SiteFooter() {
       </a>
       <a
         className="footer-link"
-        href="https://github.com/acharlas/Chaos-Equations"
+        href="https://github.com/acharlas/MyStagram"
         target="_blank"
         rel="noreferrer"
-        aria-label="Chaos-Equations on GitHub"
-        title="Chaos-Equations — GitHub"
+        aria-label="MyStagram on GitHub"
+        title="MyStagram — GitHub"
       >
         <svg
           className="footer-icon"
