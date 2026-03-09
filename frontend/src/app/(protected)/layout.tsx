@@ -59,7 +59,7 @@ export default async function ProtectedLayout({
       <NavBar username={username} avatarKey={avatarKey} />
       <main
         id="main-content"
-        className="mx-auto w-full max-w-6xl flex-1 px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 lg:max-w-none lg:px-8 lg:pb-16 lg:pt-8 xl:px-10"
+        className="mx-auto w-full max-w-6xl flex-1 px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 lg:max-w-none lg:px-8 lg:pb-10 lg:pt-8 xl:px-10"
       >
         {children}
       </main>
