@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist_Mono, Sora } from "next/font/google";
+import { SiteFooter } from "@/components/ui/site-footer";
 import "./globals.css";
 
 const sora = Sora({
@@ -34,6 +35,7 @@ export default function RootLayout({
           Aller au contenu
         </a>
         {children}
+        <SiteFooter />
       </body>
     </html>
   );
