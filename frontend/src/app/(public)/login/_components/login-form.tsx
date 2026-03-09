@@ -43,6 +43,24 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDemoLoading, setIsDemoLoading] = useState(false);
+
+  async function handleDemoLogin() {
+    setError(null);
+    setIsDemoLoading(true);
+    const callbackUrl = resolveSafeAuthRedirectTarget(null);
+    const redirectTo = await authenticateCredentials(
+      "demo_alex",
+      "password123",
+      callbackUrl,
+    );
+    setIsDemoLoading(false);
+    if (!redirectTo) {
+      setError("Compte de démonstration indisponible.");
+      return;
+    }
+    window.location.assign(redirectTo);
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -123,10 +141,25 @@ export function LoginForm() {
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || isDemoLoading}
           className="ui-accent-button w-full rounded-full py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isSubmitting ? "Connexion..." : "Se connecter"}
+        </button>
+
+        <div className="relative flex items-center gap-3">
+          <span className="h-px flex-1 bg-[color:var(--ui-border)]" />
+          <span className="ui-text-subtle text-xs">ou</span>
+          <span className="h-px flex-1 bg-[color:var(--ui-border)]" />
+        </div>
+
+        <button
+          type="button"
+          onClick={handleDemoLogin}
+          disabled={isSubmitting || isDemoLoading}
+          className="ui-surface-input ui-text-strong w-full rounded-full border ui-border py-2.5 text-sm font-semibold transition hover:border-[color:var(--ui-border-strong)] hover:bg-[color:var(--ui-surface-muted)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isDemoLoading ? "Connexion..." : "👀 Visiter en tant que démo"}
         </button>
 
         <div className="flex items-center justify-between gap-3 text-sm">
