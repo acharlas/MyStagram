@@ -159,7 +159,7 @@ export function LoginForm() {
           disabled={isSubmitting || isDemoLoading}
           className="ui-surface-input ui-text-strong w-full rounded-full border ui-border py-2.5 text-sm font-semibold transition hover:border-[color:var(--ui-border-strong)] hover:bg-[color:var(--ui-surface-muted)] disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {isDemoLoading ? "Connexion..." : "👀 Visiter en tant que démo"}
+          {isDemoLoading ? "Connexion..." : "Demo 👀"}
         </button>
 
         <div className="flex items-center justify-between gap-3 text-sm">
