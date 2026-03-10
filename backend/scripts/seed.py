@@ -235,52 +235,52 @@ BASE_POSTS: Sequence[SeedPost] = [
     SeedPost(
         username="demo_alex",
         image_key="demo/alex-1.jpg",
-        caption="Sunny day snapshots.",
+        caption="Some days the light just hits different. ☀️",
     ),
     SeedPost(
         username="demo_alex",
         image_key="demo/alex-2.jpg",
-        caption="Morning run before work.",
+        caption="5h30 du mat, tout le monde dort encore. C'est mon heure.",
     ),
     SeedPost(
         username="demo_bella",
         image_key="demo/bella-1.jpg",
-        caption="First latte art attempt!",
+        caption="Troisième essai, enfin un cœur présentable. ☕",
     ),
     SeedPost(
         username="demo_bella",
         image_key="demo/bella-2.jpg",
-        caption="Bookstore corner find.",
+        caption="Perdue entre les rayons depuis 45 minutes. Aucun regret.",
     ),
     SeedPost(
         username="demo_cara",
         image_key="demo/cara-1.jpg",
-        caption="Golden hour on the way home.",
+        caption="La lumière de 19h qui transforme tout en tableau. 🌅",
     ),
     SeedPost(
         username="demo_dan",
         image_key="demo/dan-1.jpg",
-        caption="Sunday hill climb complete.",
+        caption="420m de dénivelé. Les jambes parlent, mais la vue répond. 🚴",
     ),
     SeedPost(
         username="demo_ella",
         image_key="demo/ella-1.jpg",
-        caption="Tiny museum with huge energy.",
+        caption="Trois salles, deux heures. Ce musée m'a retourné la tête.",
     ),
     SeedPost(
         username="demo_felix",
         image_key="demo/felix-1.jpg",
-        caption="Street tacos after midnight.",
+        caption="Tacos de carne asada à 1h du matin. Aucune erreur commise. 🌮",
     ),
     SeedPost(
         username="demo_gina",
         image_key="demo/gina-1.jpg",
-        caption="Salt air and no notifications.",
+        caption="Notifications désactivées. Bruit des vagues activé. 🌊",
     ),
     SeedPost(
         username="demo_hugo",
         image_key="demo/hugo-1.jpg",
-        caption="Crosswalk shadows.",
+        caption="La ville parle si tu prends le temps de regarder vers le bas.",
     ),
 ]
 
@@ -343,12 +343,18 @@ PLACEHOLDER_COLORS: Sequence[tuple[int, int, int]] = [
     (132, 179, 140),
 ]
 SEED_COMMENT_TEMPLATES: Sequence[str] = [
-    "Super photo!",
-    "J'adore cette ambiance.",
-    "Excellent cadrage.",
-    "Top rendu des couleurs.",
-    "Magnifique shot.",
-    "Très beau moment capturé.",
+    "Cette photo me donne envie d'y être 😍",
+    "Le cadrage est parfait, vraiment.",
+    "J'aurais dû être là ! 👏",
+    "La lumière sur ce shot... incroyable.",
+    "Trop bon ce moment 🔥",
+    "Sérieusement l'une de mes préférées de toi.",
+    "On dirait une carte postale.",
+    "Respect pour te lever à cette heure-là 😂",
+    "La vibe est au rendez-vous comme toujours.",
+    "Tu as un œil pour ça, clairement.",
+    "Cette couleur de ciel 🌅 magnifique.",
+    "J'attends le prochain post avec impatience !",
 ]
 
 
