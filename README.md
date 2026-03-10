@@ -1,44 +1,47 @@
-# Instagram Core Clone
+# MyStagram
 
-mystagram is a lightweight Instagram-style demo that focuses on the essentials: authenticated users can publish posts, react with likes, leave comments, and follow each other. Everything runs locally via Docker Compose with a FastAPI backend, a Next.js frontend, and a handful of supporting services (PostgreSQL, Redis, MinIO).
+An Instagram-style web app built as a portfolio project. Users can publish posts, like, comment, follow each other, and browse a personalized feed. The full stack runs via Docker Compose — no local toolchain required.
+
+**Live demo:** [mystagram.acharlas.dev](https://mystagram.acharlas.dev) — click **Demo** on the login page to explore instantly.
 
 ---
 
 ## Screenshots
 
-![Login page for MyStagram](docs/MyStagram_Login.png)
-![Home feed with search results](docs/MyStagram_Feed_Search.png)
-![Create new post flow](docs/MyStagram_NewPost.png)
-![User profile view](docs/MyStagram_Profile.png)
+| | |
+|---|---|
+| ![Login](docs/MyStagram_Login.png) | ![Feed](docs/MyStagram_Feed_Search.png) |
+| ![New Post](docs/MyStagram_NewPost.png) | ![Profile](docs/MyStagram_Profile.png) |
 
 ---
 
-## Project Overview
+## Tech Stack
 
-- **Backend** — FastAPI application that exposes REST endpoints, handles authentication, and processes media.
-- **Frontend** — Next.js App Router client that renders the feed, detail pages, and profile tools.
-- **Infrastructure** — Docker Compose starts the full stack, including PostgreSQL, Redis, and MinIO for object storage.
-
-The repository is organised as:
-
-```
-.
-├── backend/            # FastAPI codebase
-├── frontend/           # Next.js codebase
-├── docker-compose.yml  # Showcase runtime (internet-facing demo baseline)
-├── docker-compose.dev.yml # Development override (hot reload + tool ports)
-├── .env.backend        # Backend environment values (not committed)
-├── .env.frontend       # Frontend environment values (not committed)
-└── README.md
-```
+| Layer | Technology |
+|---|---|
+| **Backend** | Python 3.12, FastAPI, SQLAlchemy (async), Alembic, Pydantic |
+| **Frontend** | Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS |
+| **Auth** | NextAuth.js v4 (credentials) + JWT access/refresh tokens |
+| **Database** | PostgreSQL 16 + asyncpg |
+| **Cache** | Redis 7 |
+| **Storage** | MinIO (S3-compatible object storage) |
+| **Infrastructure** | Docker Compose, Cloudflare Tunnel |
 
 ---
 
-## Environment Files
+## Quick Start
 
-Create the following files at the repository root before running any services. Use placeholder values locally and keep production secrets private.
+### Prerequisites
 
-### `.env.backend`
+- Docker Desktop (or Docker Engine + Compose v2)
+
+### 1. Configure environment
+
+Create two env files at the repo root:
+
+<details>
+<summary><code>.env.backend</code></summary>
+
 ```
 APP_ENV=local
 BACKEND_API_URL=http://backend:8000
@@ -53,119 +56,146 @@ SECRET_KEY=<random-string>
 ALLOW_INSECURE_HTTP_COOKIES=true
 ```
 
-`ALLOW_INSECURE_HTTP_COOKIES=true` is for local Docker HTTP only; keep it unset/false in staging and production.
+`ALLOW_INSECURE_HTTP_COOKIES=true` is for local HTTP only. Keep it unset in production behind HTTPS.
+</details>
 
-### `.env.frontend`
+<details>
+<summary><code>.env.frontend</code></summary>
+
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_URL=http://localhost
 NEXTAUTH_SECRET=<random-string>
 RATE_LIMIT_PROXY_SECRET=<shared-random-string>
 MEDIA_SIGNED_URL_ALLOWLIST=http://minio:9000
 ```
 
-Set the same `RATE_LIMIT_PROXY_SECRET` value in both `.env.backend` and `.env.frontend` so auth rate limiting can distinguish users behind the frontend container.
-`MEDIA_SIGNED_URL_ALLOWLIST` should contain internal storage origins the frontend server may fetch from (comma-separated); keep this on private Docker network hosts, not public URLs.
+Use the same `RATE_LIMIT_PROXY_SECRET` in both files.
+</details>
 
-The sample values above are safe defaults for local development. Replace the placeholders (`<...>`) with secrets when deploying elsewhere and keep those keys out of version control.
+### 2. Run
 
----
-
-## Quick Start
-
-1. **Install prerequisites**
-   - Docker Desktop (or Docker Engine + Compose v2)
-
-2. **Boot showcase mode (default)**
-   ```bash
-   docker compose up --build -d
-   ```
-   - Frontend: http://localhost:3000
-   - A one-shot `minio-init` job auto-creates the media bucket.
-   - Only frontend is published to host.
-   - PostgreSQL, Redis, and MinIO stay on the internal Docker network.
-   - Media files are served through authenticated app routes, not public MinIO URLs.
-
-3. **Optional: boot development mode (hot reload + infra tool ports)**
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-   ```
-   - Enables bind mounts and reload for backend/frontend.
-   - Backend docs: http://localhost:8000/docs
-   - Exposes PostgreSQL (5432), Redis (6379), MinIO API (9000), MinIO console (9001).
-
-4. **Seed demo data (users, follows, posts with captions and placeholder images)**
-   ```bash
-   docker compose exec backend uv run python scripts/seed.py
-   ```
-   Seeded users are assigned the same default avatar key used by registration (`avatars/default/default-avatar.png`).
-
-   Demo accounts:
-   - `demo_alex` / `password123`
-   - `demo_bella` / `password123`
-   - `demo_cara` / `password123`
-
-   Optional: use your own images for a richer feed.
-   - Fast path: put images directly in `backend/scripts/seed_media/` and they will be auto-distributed across demo users.
-   - Or target a user: `backend/scripts/seed_media/<username>/<image-file>`.
-   - Example: `backend/scripts/seed_media/demo_alex/beach.jpg`
-   - Re-run seed; files are uploaded to MinIO and used as feed posts.
-   - Custom media path:
-     ```bash
-     docker compose exec -e SEED_MEDIA_DIR=/app/scripts/seed_media backend uv run python scripts/seed.py
-     ```
-
-5. **Stop the stack**
-   ```bash
-   docker compose down
-   ```
-   Add `-v` to drop local volumes if you need a clean reset.
-
-Dismissed-notification backlog cleanup is launched in background at backend container startup.
-Set `DISMISSED_PRUNE_ON_STARTUP=false` in `.env.backend` to skip it.
-Startup prune is bounded by default:
-- `DISMISSED_MAX_USERS_PER_RUN=200`
-- `DISMISSED_MAX_ROWS_PER_RUN=5000`
-- `DISMISSED_MAX_ELAPSED_SECONDS=30`
-
-Default avatar asset is synchronized to MinIO at backend startup from:
-- `backend/assets/default_avatars/default-avatar.png`
-
-Set `SYNC_DEFAULT_AVATARS_ON_STARTUP=false` in `.env.backend` to skip this sync step.
-You can run it manually:
 ```bash
-docker compose exec backend uv run python scripts/sync_default_avatars.py
+# Production mode (frontend on port 80)
+docker compose up --build -d
+
+# Seed demo data (users, posts, comments, follows)
+docker compose exec backend uv run python scripts/seed.py
 ```
 
-You can still run it manually:
+Open [http://localhost](http://localhost) and log in with `demo_alex` / `password123`.
+
+### 3. Development mode
+
 ```bash
-docker compose exec backend uv run python scripts/prune_dismissed_notifications.py
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+Enables hot reload (bind mounts) and exposes all service ports:
+
+| Service | URL |
+|---|---|
+| Frontend | http://localhost |
+| Backend docs | http://localhost:8000/docs |
+| PostgreSQL | localhost:5432 |
+| Redis | localhost:6379 |
+| MinIO API / Console | localhost:9000 / localhost:9001 |
+
+### 4. Stop
+
+```bash
+docker compose down       # keep data
+docker compose down -v    # drop volumes for clean reset
 ```
 
 ---
 
-## Runtime Model
+## Architecture
 
-This project is Docker-only. Run backend and frontend through `docker compose`; direct host execution with `npm`, `uv`, or `python` is not a supported workflow.
+```
+                    ┌─────────────┐
+                    │  Cloudflare  │
+                    │   Tunnel     │
+                    └──────┬──────┘
+                           │
+               ┌───────────▼───────────┐
+               │   Next.js Frontend    │  :80
+               │   (App Router + BFF)  │
+               └───────────┬───────────┘
+                           │ internal
+               ┌───────────▼───────────┐
+               │   FastAPI Backend     │  :8000
+               │   (REST API)          │
+               └──┬────────┬────────┬──┘
+                  │        │        │
+            ┌─────▼──┐ ┌──▼───┐ ┌──▼────┐
+            │Postgres│ │Redis │ │ MinIO  │
+            │  :5432 │ │:6379 │ │ :9000  │
+            └────────┘ └──────┘ └───────-┘
+```
 
-For portfolio demos reachable from the internet, use the default `docker-compose.yml` mode and keep infra services private.
+**Backend** (`backend/`) — Layered FastAPI app: `api/v1/` routes, `services/` business logic, `models/` ORM, `db/` session management. Uses UV as package manager.
 
-## Demo Guardrails
+**Frontend** (`frontend/`) — Next.js App Router with `(protected)/` and `(public)/` route groups. BFF API routes (`/api/*`) proxy requests to the backend with auth headers. Media is served through authenticated app routes, never directly from MinIO.
 
-Before exposing the app publicly (even as a demo), ensure:
-- `SECRET_KEY` and `NEXTAUTH_SECRET` are unique non-default values.
-- MinIO root credentials are non-default.
-- You run behind HTTPS/TLS at the edge (reverse proxy or tunnel).
-- You do not publish Postgres/Redis/MinIO ports on the host.
+**Auth flow** — NextAuth.js credentials provider issues short-lived JWT access tokens + rotating refresh tokens. The frontend auto-refreshes via `jwt-lifecycle.ts` + `refresh-coordinator.ts`.
 
 ---
 
-## Contributing & Support
+## Seed Data
 
-Feel free to open issues or pull requests for bug fixes, feature proposals, or documentation updates. Always avoid sharing real credentials in tickets or commits.
+The seed script creates demo users with posts, likes, comments, and follow relationships.
+
+```bash
+docker compose exec backend uv run python scripts/seed.py
+```
+
+| Account | Password |
+|---|---|
+| `demo_alex` | `password123` |
+| `demo_bella` | `password123` |
+| `demo_cara` | `password123` |
+
+**Custom images:** Drop files into `backend/scripts/seed_media/` (auto-distributed) or `backend/scripts/seed_media/<username>/` (targeted). Re-run the seed script to upload them.
+
+---
+
+## Testing
+
+```bash
+# Backend (223 tests)
+docker compose exec backend uv run pytest
+
+# Frontend (267 tests)
+docker compose exec frontend npm test
+```
+
+### Linting & Type Checking
+
+```bash
+# Backend
+docker compose exec backend uv run ruff check .
+docker compose exec backend uv run ruff format --check .
+docker compose exec backend uv run mypy .
+
+# Frontend
+docker compose exec frontend npm run lint
+```
+
+---
+
+## Production Checklist
+
+Before exposing publicly:
+
+- [ ] Set unique `SECRET_KEY` and `NEXTAUTH_SECRET`
+- [ ] Set non-default MinIO credentials
+- [ ] Run behind HTTPS (reverse proxy or Cloudflare Tunnel)
+- [ ] Keep `ALLOW_INSECURE_HTTP_COOKIES` unset or `false`
+- [ ] Do not publish Postgres/Redis/MinIO ports on the host
 
 ---
 
 ## License
 
-This project is released under the MIT License. See `LICENSE` for details.
+Released under the MIT License. See [LICENSE](LICENSE) for details.
