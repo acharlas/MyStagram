@@ -142,7 +142,7 @@ export default async function ProtectedHomePage() {
             pageSize={HOME_FEED_PAGE_SIZE}
           />
         </div>
-        <div className="w-full xl:justify-self-end">
+        <div className="hidden w-full xl:block xl:justify-self-end">
           <div className="xl:sticky xl:top-5">
             <WhoToFollowPanel
               initialUsers={whoToFollow}
